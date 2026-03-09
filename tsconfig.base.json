@@ -2,7 +2,8 @@
   "compilerOptions": {
     "target": "ES2015",
     "module": "ESNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "node16",
+    "composite": true,
     "strict": true,
     "declaration": true,
     "declarationMap": true,
