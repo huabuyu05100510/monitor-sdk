@@ -1,7 +1,7 @@
 {
-  "name": "@monit/white-screen",
+  "name": "@monit/browser",
   "version": "0.1.0",
-  "description": "Frontend monitor white screen detection plugin",
+  "description": "Frontend monitor SDK browser entry",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,7 +21,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@monit/core": "workspace:*"
+    "@monit/core": "workspace:*",
+    "@monit/error": "workspace:*",
+    "@monit/request": "workspace:*",
+    "@monit/white-screen": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
