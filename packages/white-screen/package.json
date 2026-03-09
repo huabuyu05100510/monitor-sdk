@@ -1,6 +1,6 @@
 {
   "name": "@monit/white-screen",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Frontend monitor white screen detection plugin",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

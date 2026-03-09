@@ -1,6 +1,6 @@
 {
   "name": "@monit/browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Frontend monitor SDK browser entry",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
