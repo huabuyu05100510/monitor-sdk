@@ -16,11 +16,7 @@ export class Monitor {
 
   constructor(config: MonitorConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    this.queue = new ReportQueue(
-      this.config.maxQueueSize,
-      this.config.flushInterval,
-      (events) => sendEvents(this.config.dsn, events),
-    )
+    this.queue = this.createQueue()
   }
 
   init(): void {
@@ -45,7 +41,16 @@ export class Monitor {
     }
     this.plugins = []
     this.queue.destroy()
+    this.queue = this.createQueue()  // 重建 queue，确保 destroy 后可重新 init
     this.initialized = false
+  }
+
+  private createQueue(): ReportQueue {
+    return new ReportQueue(
+      this.config.maxQueueSize,
+      this.config.flushInterval,
+      (events) => sendEvents(this.config.dsn, events),
+    )
   }
 
   private createContext(): MonitorContext {

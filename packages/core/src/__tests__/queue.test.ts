@@ -1,11 +1,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ReportQueue } from '../queue'
+import type { MonitorEvent } from '../types'
 
-// mock document.addEventListener
+// mock document.addEventListener / removeEventListener
+const listeners: Record<string, EventListener> = {}
 Object.defineProperty(document, 'addEventListener', {
-  value: vi.fn(),
+  value: vi.fn((event: string, handler: EventListener) => {
+    listeners[event] = handler
+  }),
   writable: true,
 })
+Object.defineProperty(document, 'removeEventListener', {
+  value: vi.fn((event: string) => {
+    delete listeners[event]
+  }),
+  writable: true,
+})
+
+function makeEvent(overrides: Partial<MonitorEvent> = {}): MonitorEvent {
+  return {
+    appId: 'test-app',
+    type: 'error',
+    subType: 'js',
+    timestamp: Date.now(),
+    url: 'http://localhost',
+    userAgent: 'test-agent',
+    payload: {},
+    ...overrides,
+  }
+}
 
 describe('ReportQueue', () => {
   beforeEach(() => {
@@ -20,12 +43,14 @@ describe('ReportQueue', () => {
     const reportFn = vi.fn()
     const queue = new ReportQueue(3, 5000, reportFn)
 
-    queue.push({ appId: 'test' } as any)
-    queue.push({ appId: 'test' } as any)
+    queue.push(makeEvent())
+    queue.push(makeEvent())
     expect(reportFn).not.toHaveBeenCalled()
 
-    queue.push({ appId: 'test' } as any)
-    expect(reportFn).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ appId: 'test' })]))
+    queue.push(makeEvent())
+    expect(reportFn).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ appId: 'test-app' })]),
+    )
     queue.destroy()
   })
 
@@ -33,7 +58,7 @@ describe('ReportQueue', () => {
     const reportFn = vi.fn()
     const queue = new ReportQueue(10, 1000, reportFn)
 
-    queue.push({ appId: 'test' } as any)
+    queue.push(makeEvent())
     expect(reportFn).not.toHaveBeenCalled()
 
     vi.advanceTimersByTime(1000)
@@ -48,5 +73,13 @@ describe('ReportQueue', () => {
     vi.advanceTimersByTime(1000)
     expect(reportFn).not.toHaveBeenCalled()
     queue.destroy()
+  })
+
+  it('should remove visibilitychange listener on destroy', () => {
+    const reportFn = vi.fn()
+    const queue = new ReportQueue(10, 5000, reportFn)
+    expect(document.addEventListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
+    queue.destroy()
+    expect(document.removeEventListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
   })
 })

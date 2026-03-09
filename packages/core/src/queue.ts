@@ -8,11 +8,17 @@ export class ReportQueue {
   private readonly maxSize: number
   private readonly interval: number
   private readonly reportFn: ReportFn
+  private readonly visibilityHandler: () => void
 
   constructor(maxSize: number, interval: number, reportFn: ReportFn) {
     this.maxSize = maxSize
     this.interval = interval
     this.reportFn = reportFn
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        this.flush()
+      }
+    }
     this.startTimer()
     this.bindVisibilityChange()
   }
@@ -36,6 +42,7 @@ export class ReportQueue {
       clearInterval(this.timer)
       this.timer = null
     }
+    document.removeEventListener('visibilitychange', this.visibilityHandler)
   }
 
   private startTimer(): void {
@@ -43,10 +50,6 @@ export class ReportQueue {
   }
 
   private bindVisibilityChange(): void {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        this.flush()
-      }
-    })
+    document.addEventListener('visibilitychange', this.visibilityHandler)
   }
 }
