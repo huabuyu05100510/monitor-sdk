@@ -14,9 +14,12 @@ const ctxCapturePlugin = {
   },
 }
 
-// In production (GitHub Pages) there's no backend — events are captured locally only.
-// Set VITE_DSN env var (or run locally) to report to the Monitor Platform backend.
-const dsn = import.meta.env.VITE_DSN ?? 'http://localhost:4000/api/errors/report'
+// DSN priority: localStorage (runtime) > VITE_DSN (build-time) > local default
+// Set via: localStorage.setItem('MONITOR_DSN', 'https://xxx.ngrok.io/api/errors/report')
+const dsn =
+  localStorage.getItem('MONITOR_DSN') ??
+  import.meta.env.VITE_DSN ??
+  'http://localhost:4000/api/errors/report'
 
 init({
   appId: 'react-demo',
