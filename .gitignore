@@ -4,3 +4,13 @@ dist
 *.d.ts.map
 *.tsbuildinfo
 .DS_Store
+
+# Backend
+platform/backend/.env
+platform/backend/uploads/
+platform/backend/*.db
+platform/backend/*.db-journal
+
+# Frontend build
+platform/frontend/dist/
+platform/backend/[0-9a-f]*/
