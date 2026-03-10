@@ -2,6 +2,74 @@ import { useState } from 'react'
 import { MonitorErrorBoundary } from '@monit/react'
 import EventLog from './EventLog'
 
+// ── DSN 配置浮层 ─────────────────────────────────────────────────────────────
+function DsnConfig() {
+  const current = localStorage.getItem('MONITOR_DSN') || ''
+  const [open, setOpen] = useState(false)
+  const [val, setVal] = useState(current)
+  const [saved, setSaved] = useState(false)
+
+  const save = () => {
+    if (val.trim()) {
+      localStorage.setItem('MONITOR_DSN', val.trim())
+    } else {
+      localStorage.removeItem('MONITOR_DSN')
+    }
+    setSaved(true)
+    setTimeout(() => { setOpen(false); setSaved(false); window.location.reload() }, 800)
+  }
+
+  const btnStyle: React.CSSProperties = {
+    position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
+    background: current ? '#409EFF' : '#e6a23c',
+    color: '#fff', border: 'none', borderRadius: 20, padding: '6px 14px',
+    cursor: 'pointer', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  }
+
+  return (
+    <>
+      <button style={btnStyle} onClick={() => setOpen(o => !o)}>
+        {current ? '📡 已配置上报' : '⚠️ 配置上报地址'}
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'fixed', bottom: 52, right: 16, zIndex: 9999,
+          background: '#fff', borderRadius: 10, padding: 16, width: 360,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)', fontSize: 13,
+        }}>
+          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>上报地址 (DSN)</p>
+          <p style={{ margin: '0 0 10px', color: '#666', fontSize: 11, lineHeight: 1.5 }}>
+            填入 cloudflared 隧道地址，例如：<br />
+            <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }}>
+              https://xxx.trycloudflare.com/api/errors/report
+            </code>
+          </p>
+          <input
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            placeholder="https://xxx.trycloudflare.com/api/errors/report"
+            style={{
+              width: '100%', boxSizing: 'border-box', border: '1px solid #ddd',
+              borderRadius: 6, padding: '6px 8px', fontSize: 12, fontFamily: 'monospace',
+            }}
+          />
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={() => setOpen(false)}
+              style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 12 }}>
+              取消
+            </button>
+            <button onClick={save}
+              style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: '#409EFF', color: '#fff', cursor: 'pointer', fontSize: 12 }}>
+              {saved ? '✓ 已保存' : '保存并刷新'}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Buggy component — throws during render when activated
 // ---------------------------------------------------------------------------
@@ -228,6 +296,9 @@ export default function App() {
           <EventLog />
         </div>
       </div>
+
+      {/* DSN 配置悬浮按钮 */}
+      <DsnConfig />
     </div>
   )
 }

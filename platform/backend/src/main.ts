@@ -26,6 +26,12 @@ async function bootstrap() {
     credentials: true,
   })
 
+  // Allow Chrome's Private Network Access: HTTPS pages (GitHub Pages) calling http://localhost
+  app.use((_req: any, res: any, next: any) => {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true')
+    next()
+  })
+
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }))
   app.setGlobalPrefix('api')
 

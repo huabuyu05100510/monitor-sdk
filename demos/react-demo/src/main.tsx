@@ -15,10 +15,10 @@ const ctxCapturePlugin = {
 }
 
 // DSN priority: localStorage (runtime) > VITE_DSN (build-time) > local default
-// Set via: localStorage.setItem('MONITOR_DSN', 'https://xxx.ngrok.io/api/errors/report')
+// || instead of ?? so empty string also falls through to next option
 const dsn =
-  localStorage.getItem('MONITOR_DSN') ??
-  import.meta.env.VITE_DSN ??
+  localStorage.getItem('MONITOR_DSN') ||
+  import.meta.env.VITE_DSN ||
   'http://localhost:4000/api/errors/report'
 
 init({
