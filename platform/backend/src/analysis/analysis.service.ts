@@ -117,4 +117,21 @@ export class AnalysisService {
   indexCode(doc: Parameters<CodeRagService['indexDocument']>[0]) {
     return this.codeRagService.indexDocument(doc)
   }
+
+  /**
+   * Walk the project's sourceRoot and batch-index all source files into ChromaDB.
+   * Returns stats on how many chunks were indexed.
+   */
+  async indexSource(appId: string): Promise<
+    { files: number; indexed: number; skipped: number } | { error: string }
+  > {
+    const project = await this.projectsService.findByAppId(appId)
+    if (!project) return { error: `Project not found: ${appId}` }
+    if (!project.sourceRoot) {
+      return { error: '请先在项目设置中配置 sourceRoot（源码根目录）' }
+    }
+
+    this.logger.log(`Indexing source for ${appId} from ${project.sourceRoot}`)
+    return this.codeRagService.walkAndIndex(project.sourceRoot, appId, project.id)
+  }
 }

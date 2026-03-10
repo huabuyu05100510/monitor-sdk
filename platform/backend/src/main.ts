@@ -7,23 +7,13 @@ import { AppModule } from './app.module'
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
 
-  const allowedOrigins = (
-    process.env.CORS_ORIGIN ??
-    'http://localhost:5173,http://localhost:3000,https://huabuyu05100510.github.io'
-  )
-    .split(',')
-    .map((o) => o.trim())
-
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. sendBeacon, curl, Swagger)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true)
-      } else {
-        callback(new Error(`CORS: origin ${origin} not allowed`))
-      }
-    },
+    // Reflect the request origin — allows any origin (localhost tunnels, GitHub Pages, etc.)
+    // Safe for a local dev monitoring backend since it's not publicly deployed.
+    origin: true,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 
   // Allow Chrome's Private Network Access: HTTPS pages (GitHub Pages) calling http://localhost

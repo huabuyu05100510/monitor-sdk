@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { OpenAIEmbeddings } from '@langchain/openai'
 import { ChromaClient, Collection } from 'chromadb'
+import * as fs from 'fs'
+import * as path from 'path'
 
 /**
  * Manages the code vector store (ChromaDB) and provides:
@@ -88,6 +90,83 @@ export class CodeRagService implements OnModuleInit {
         },
       ],
     })
+  }
+
+  /**
+   * Walk a source directory and index all .ts/.tsx/.js/.jsx files into the vector store.
+   * Each file is split into chunks of up to `chunkLines` lines to keep embeddings focused.
+   * Returns the number of chunks indexed.
+   */
+  async walkAndIndex(
+    sourceRoot: string,
+    appId: string,
+    projectId: string,
+    chunkLines = 60,
+  ): Promise<{ indexed: number; skipped: number; files: number }> {
+    if (!this.collection || !this.embeddings) {
+      this.logger.warn('walkAndIndex called but ChromaDB / embeddings not available')
+      return { indexed: 0, skipped: 0, files: 0 }
+    }
+
+    const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.cache', 'coverage', 'build', '__tests__'])
+    const SOURCE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx'])
+
+    const allFiles: string[] = []
+    const queue: string[] = [path.resolve(sourceRoot)]
+
+    while (queue.length > 0) {
+      const dir = queue.shift()!
+      let entries: fs.Dirent[]
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { continue }
+      for (const e of entries) {
+        if (e.isDirectory()) {
+          if (!SKIP_DIRS.has(e.name)) queue.push(path.join(dir, e.name))
+        } else if (SOURCE_EXT.has(path.extname(e.name))) {
+          allFiles.push(path.join(dir, e.name))
+        }
+      }
+    }
+
+    let indexed = 0
+    let skipped = 0
+
+    for (const filePath of allFiles) {
+      let content: string
+      try { content = fs.readFileSync(filePath, 'utf-8') } catch { skipped++; continue }
+
+      const lines = content.split('\n')
+      const relPath = '/' + path.relative(path.resolve(sourceRoot), filePath).replace(/\\/g, '/')
+
+      // Split file into overlapping chunks
+      for (let start = 0; start < lines.length; start += chunkLines - 10) {
+        const end = Math.min(lines.length, start + chunkLines)
+        const chunkCode = lines.slice(start, end).join('\n').trim()
+        if (chunkCode.length < 30) continue  // skip tiny chunks
+
+        // Extract a representative function name from the chunk (first function/const/class)
+        const fnMatch = /(?:function\s+(\w+)|(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+)?(?:const|let|var)\s+(\w+)\s*[=:]\s*(?:async\s+)?\(|class\s+(\w+))/.exec(chunkCode)
+        const functionName = fnMatch?.[1] ?? fnMatch?.[2] ?? fnMatch?.[3] ?? `chunk_${start}`
+
+        try {
+          await this.indexDocument({
+            appId,
+            projectId,
+            filePath: relPath,
+            functionName,
+            startLine: start + 1,
+            endLine: end,
+            code: chunkCode,
+          })
+          indexed++
+        } catch (err) {
+          this.logger.warn(`Failed to index ${relPath}:${start}`, err)
+          skipped++
+        }
+      }
+    }
+
+    this.logger.log(`walkAndIndex done: ${allFiles.length} files, ${indexed} chunks indexed, ${skipped} skipped`)
+    return { indexed, skipped, files: allFiles.length }
   }
 
   /**

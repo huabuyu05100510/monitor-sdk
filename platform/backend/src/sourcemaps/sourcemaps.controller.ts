@@ -4,6 +4,8 @@ import {
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { ApiTags, ApiOperation, ApiConsumes } from '@nestjs/swagger'
+import { execSync } from 'child_process'
+import * as path from 'path'
 import { SourcemapsService } from './sourcemaps.service'
 import { ProjectsService } from '../projects/projects.service'
 
@@ -68,5 +70,26 @@ export class SourcemapsController {
     }
 
     return this.svc.resolveStack(appId, version, stack)
+  }
+
+  /**
+   * Run `git pull` in the repository root to sync source maps committed by CI.
+   * After calling this endpoint, the latest maps are available without any manual steps.
+   */
+  @Post('sync')
+  @ApiOperation({ summary: 'git pull 同步 CI 提交的最新 source maps' })
+  sync() {
+    // Resolve repo root from this file's location: backend/src/sourcemaps → ../../../../
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..')
+    try {
+      const output = execSync('git pull --ff-only', {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        timeout: 30_000,
+      })
+      return { ok: true, output: output.trim() }
+    } catch (err: any) {
+      throw new BadRequestException(`git pull failed: ${err.message ?? err}`)
+    }
   }
 }

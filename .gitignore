@@ -9,6 +9,9 @@ dist
 # Backend
 platform/backend/.env
 platform/backend/uploads/
+# Source maps committed by CI must be tracked (exception to the uploads/ rule above)
+!platform/backend/uploads/sourcemaps/
+!platform/backend/uploads/sourcemaps/**
 platform/backend/*.db
 platform/backend/*.db-journal
 

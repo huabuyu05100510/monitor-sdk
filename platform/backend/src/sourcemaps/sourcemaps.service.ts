@@ -126,11 +126,26 @@ export class SourcemapsService {
     }
 
     if (!record) {
-      this.logger.warn(
-        `No sourcemap for ${appId}@${version} :: ${bundleFilename}. ` +
-          'Upload via POST /api/sourcemaps/upload or run "pnpm upload-maps" in the demo.',
-      )
-      return { source: frame.filename, line: frame.line, column: frame.column, name: null, resolved: false }
+      // Filesystem fallback: source maps committed directly to the repo (via CI) don't
+      // go through the upload API, so they have no DB record. Look for the file on disk.
+      const fsPaths = [
+        path.join(this.globalBaseDir, appId, version, `${bundleFilename}.map`),
+        path.join(this.globalBaseDir, appId, version, bundleFilename),
+        path.join(this.globalBaseDir, appId, 'latest', `${bundleFilename}.map`),
+        path.join(this.globalBaseDir, appId, 'latest', bundleFilename),
+      ]
+      const foundPath = fsPaths.find((p) => fs.existsSync(p))
+      if (foundPath) {
+        this.logger.debug(`Filesystem fallback: using ${foundPath} (no DB record)`)
+        // Synthesise a temporary record-like object so the resolution logic below can proceed
+        record = { storagePath: foundPath } as any
+      } else {
+        this.logger.warn(
+          `No sourcemap for ${appId}@${version} :: ${bundleFilename}. ` +
+            'Run "git pull" to sync maps committed by CI, or upload manually.',
+        )
+        return { source: frame.filename, line: frame.line, column: frame.column, name: null, resolved: false }
+      }
     }
 
     try {

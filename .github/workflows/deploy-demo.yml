@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed to commit source maps back to repo
   pages: write
   id-token: write
 
@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -50,16 +52,35 @@ jobs:
         run: pnpm build
         env:
           VITE_BASE: /monitor-sdk/
-          # VITE_DSN is intentionally NOT embedded in the bundle.
-          # The DSN is configured at runtime via the floating UI (localStorage).
+          # VITE_DSN is intentionally NOT embedded — configured at runtime via localStorage UI.
 
-      - name: Save source maps as artifact (for local backend upload)
-        uses: actions/upload-artifact@v4
-        with:
-          name: sourcemaps-${{ github.sha }}
-          path: demos/react-demo/dist/assets/*.map
-          retention-days: 30
+      # ── Commit source maps to repo so local backend can read them after git pull ──
+      - name: Commit source maps to repo
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          MAPS_DIR="platform/backend/uploads/sourcemaps/react-demo"
 
+          # Copy maps into backend uploads directory (versioned + latest alias)
+          mkdir -p "${MAPS_DIR}/${SHORT_SHA}"
+          mkdir -p "${MAPS_DIR}/latest"
+          cp demos/react-demo/dist/assets/*.map "${MAPS_DIR}/${SHORT_SHA}/"
+          cp demos/react-demo/dist/assets/*.map "${MAPS_DIR}/latest/"
+
+          # Configure git
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add "${MAPS_DIR}/${SHORT_SHA}/" "${MAPS_DIR}/latest/"
+
+          # Only commit if there are changes
+          if git diff --cached --quiet; then
+            echo "Source maps unchanged, skipping commit."
+          else
+            git commit -m "ci: update source maps for react-demo@${SHORT_SHA} [skip ci]"
+            git push
+          fi
+
+      # Remove maps from the Pages artifact (never expose them publicly)
       - name: Remove source maps from deployment
         run: find demos/react-demo/dist -name "*.map" -delete
 

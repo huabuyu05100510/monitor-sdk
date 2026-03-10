@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Save, FolderOpen, Tag, Code2, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Save, FolderOpen, Tag, Code2, CheckCircle2, AlertTriangle, Database, Loader2, RefreshCw } from 'lucide-react'
 import { api, type Project } from '../lib/api'
 
 export default function ProjectSettings() {
@@ -9,6 +9,10 @@ export default function ProjectSettings() {
   const [form, setForm] = useState({ sourcemapVersion: '', sourcemapDir: '', sourceRoot: '' })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null)
+  const [indexing, setIndexing] = useState(false)
+  const [indexResult, setIndexResult] = useState<{ files: number; indexed: number; skipped: number } | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncOutput, setSyncOutput] = useState<string | null>(null)
 
   useEffect(() => {
     if (!appId) return
@@ -25,6 +29,40 @@ export default function ProjectSettings() {
         }
       })
   }, [appId])
+
+  const syncMaps = async () => {
+    setSyncing(true)
+    setSyncOutput(null)
+    try {
+      const r = await api.post<{ ok: boolean; output: string }>('/sourcemaps/sync')
+      setSyncOutput(r.data.output || 'Already up to date.')
+      setToast({ type: 'ok', msg: '同步完成' })
+    } catch (e: any) {
+      const msg = e?.response?.data?.message ?? 'git pull 失败'
+      setSyncOutput(msg)
+      setToast({ type: 'err', msg })
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setToast(null), 4000)
+    }
+  }
+
+  const indexSource = async () => {
+    if (!appId) return
+    setIndexing(true)
+    setIndexResult(null)
+    try {
+      const r = await api.post<{ files: number; indexed: number; skipped: number }>(`/analysis/index-source/${appId}`)
+      setIndexResult(r.data)
+      setToast({ type: 'ok', msg: `索引完成：${r.data.indexed} 个代码块` })
+    } catch (e: any) {
+      const msg = e?.response?.data?.message ?? '索引失败，请检查 sourceRoot 是否配置正确'
+      setToast({ type: 'err', msg })
+    } finally {
+      setIndexing(false)
+      setTimeout(() => setToast(null), 5000)
+    }
+  }
 
   const save = async () => {
     if (!project) return
@@ -52,6 +90,30 @@ export default function ProjectSettings() {
 
       <h1 className="text-xl font-bold text-gray-900 mb-1">项目设置</h1>
       <p className="text-sm text-gray-400 mb-6">appId: <strong>{appId}</strong></p>
+
+      {/* Sync banner */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-5 mb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-blue-800 mb-1">CI 自动同步 Source Maps</p>
+            <p className="text-xs text-blue-600 leading-relaxed">
+              每次推送到 master 后，GitHub Actions 会自动构建并把 <code className="bg-blue-100 px-1 rounded">.map</code> 文件 commit 回仓库。<br />
+              点击「同步」执行 <code className="bg-blue-100 px-1 rounded">git pull</code>，本地后端立即获得最新 source maps，无需手动上传。
+            </p>
+            {syncOutput && (
+              <pre className="mt-2 text-xs bg-blue-100 text-blue-900 rounded p-2 font-mono whitespace-pre-wrap">{syncOutput}</pre>
+            )}
+          </div>
+          <button
+            onClick={syncMaps}
+            disabled={syncing}
+            className="flex-shrink-0 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {syncing ? '同步中…' : '同步'}
+          </button>
+        </div>
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm divide-y divide-gray-50">
 
@@ -133,6 +195,43 @@ export default function ProjectSettings() {
             对于本地开发，通常填写 demo 项目的根目录，例如：
             <code className="bg-gray-100 px-1 rounded ml-1">/Users/didi/Documents/code/monitor-sdk/demos/react-demo</code>
           </p>
+        </div>
+
+        {/* RAG Index */}
+        <div className="p-6">
+          <div className="flex items-start gap-3 mb-3">
+            <Database size={16} className="text-indigo-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-gray-800">
+                RAG 源码索引
+                <span className="ml-2 text-xs font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">需要 ChromaDB</span>
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">
+                扫描 sourceRoot 目录下的所有 .ts/.tsx 文件，将代码块批量写入向量数据库。<br />
+                建立索引后，AI 分析可通过语义搜索检索相关代码，作为直接文件读取的补充。<br />
+                需先保存 sourceRoot，且本地已启动 ChromaDB（<code className="bg-gray-100 px-1 rounded">docker run -p 8000:8000 chromadb/chroma</code>）。
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={indexSource}
+              disabled={indexing || !form.sourceRoot}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              {indexing ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
+              {indexing ? '索引中…' : '索引源代码'}
+            </button>
+            {indexResult && (
+              <span className="text-xs text-gray-500">
+                扫描 {indexResult.files} 个文件 · 写入 {indexResult.indexed} 个代码块
+                {indexResult.skipped > 0 && ` · 跳过 ${indexResult.skipped} 个`}
+              </span>
+            )}
+            {!form.sourceRoot && (
+              <span className="text-xs text-amber-500">请先填写并保存 sourceRoot</span>
+            )}
+          </div>
         </div>
 
         {/* Save button */}
