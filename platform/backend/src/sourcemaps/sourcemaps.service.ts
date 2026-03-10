@@ -8,6 +8,17 @@ import * as path from 'path'
 const { SourceMapConsumer } = require('source-map-js')
 import { Sourcemap } from './sourcemap.entity'
 
+/** Fetch a URL and return its text content, or null on error. */
+async function fetchText(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+    if (!res.ok) return null
+    return await res.text()
+  } catch {
+    return null
+  }
+}
+
 export interface ResolvedFrame {
   source: string | null
   line: number | null
@@ -30,6 +41,15 @@ export class SourcemapsService {
   /** Global fallback base directory (from env / .env) */
   private readonly globalBaseDir: string
 
+  /**
+   * Optional GitHub raw base URL for fetching CI-committed source maps.
+   * Format: https://raw.githubusercontent.com/<owner>/<repo>/<branch>
+   * When set, the service will fetch missing map files from GitHub and cache them locally.
+   * Example value (set in .env):
+   *   GITHUB_RAW_BASE=https://raw.githubusercontent.com/huabuyu05100510/monitor-sdk/master
+   */
+  private readonly githubRawBase: string | null
+
   constructor(
     @InjectRepository(Sourcemap)
     private readonly repo: Repository<Sourcemap>,
@@ -37,6 +57,12 @@ export class SourcemapsService {
   ) {
     this.globalBaseDir = path.resolve(config.get('SOURCEMAP_DIR', './uploads/sourcemaps'))
     fs.mkdirSync(this.globalBaseDir, { recursive: true })
+
+    const raw = config.get<string>('GITHUB_RAW_BASE', '')
+    this.githubRawBase = raw ? raw.replace(/\/$/, '') : null
+    if (this.githubRawBase) {
+      this.logger.log(`GitHub raw fallback enabled: ${this.githubRawBase}`)
+    }
   }
 
   /**
@@ -137,12 +163,53 @@ export class SourcemapsService {
       const foundPath = fsPaths.find((p) => fs.existsSync(p))
       if (foundPath) {
         this.logger.debug(`Filesystem fallback: using ${foundPath} (no DB record)`)
-        // Synthesise a temporary record-like object so the resolution logic below can proceed
         record = { storagePath: foundPath } as any
+      } else if (this.githubRawBase) {
+        // GitHub remote fallback: fetch the map file from the repo and cache it locally.
+        // Path in repo: platform/backend/uploads/sourcemaps/<appId>/<version>/<file>.map
+        const repoSubPath = `platform/backend/uploads/sourcemaps/${appId}`
+        const candidates = [
+          `${repoSubPath}/${version}/${bundleFilename}.map`,
+          `${repoSubPath}/${version}/${bundleFilename}`,
+          `${repoSubPath}/latest/${bundleFilename}.map`,
+          `${repoSubPath}/latest/${bundleFilename}`,
+        ]
+
+        let fetchedContent: string | null = null
+        let fetchedPath = ''
+        for (const candidate of candidates) {
+          const url = `${this.githubRawBase}/${candidate}`
+          this.logger.debug(`GitHub fallback: trying ${url}`)
+          const content = await fetchText(url)
+          if (content) {
+            fetchedContent = content
+            fetchedPath = candidate
+            break
+          }
+        }
+
+        if (fetchedContent) {
+          // Cache to disk so subsequent requests are served locally
+          const cacheDir = path.join(
+            this.globalBaseDir, appId,
+            fetchedPath.includes('/latest/') ? 'latest' : version,
+          )
+          fs.mkdirSync(cacheDir, { recursive: true })
+          const cachePath = path.join(cacheDir, `${bundleFilename}.map`)
+          fs.writeFileSync(cachePath, fetchedContent, 'utf-8')
+          this.logger.log(`GitHub fallback: cached ${bundleFilename}.map from ${fetchedPath}`)
+          record = { storagePath: cachePath } as any
+        } else {
+          this.logger.warn(
+            `No sourcemap for ${appId}@${version} :: ${bundleFilename}. ` +
+              'Not found locally or on GitHub. Push code to trigger CI, or upload manually.',
+          )
+          return { source: frame.filename, line: frame.line, column: frame.column, name: null, resolved: false }
+        }
       } else {
         this.logger.warn(
           `No sourcemap for ${appId}@${version} :: ${bundleFilename}. ` +
-            'Run "git pull" to sync maps committed by CI, or upload manually.',
+            'Set GITHUB_RAW_BASE in .env to enable automatic GitHub fallback, or run "git pull".',
         )
         return { source: frame.filename, line: frame.line, column: frame.column, name: null, resolved: false }
       }
