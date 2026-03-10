@@ -461,9 +461,10 @@ export default function ErrorLab() {
       icon: '📨',
       color: '#6c5ce7',
       action: () => {
-        // 支付宝/微信回调使用 URL-safe Base64，含 - 和 _ 字符
-        const urlSafePayload = 'eyJvcmRlcl9pZCI6Ik9SRC0yMDI0MDMxOC05OTIxIiwiYW1vdW50IjozNTAsInN0YXR1cyI6InN1Y2Nlc3MifQ=='
-          .replace(/\+/g, '-').replace(/\//g, '_')
+        // 支付平台签名字段含 > < 等字符，base64 编码后出现 / 和 +，
+        // 平台转成 URL-safe 格式（/ → _，+ → -）后直接传给前端
+        // 此字符串含 - 字符，标准 atob() 无法解码
+        const urlSafePayload = 'eyJvcmRlcl9pZCI6Ik9SRC0yMDI0IiwiYW1vdW50IjozNTAsInN0YXR1cyI6InN1Y2Nlc3MiLCJzaWciOiI-Pj48PDwifQ=='
         const data = parseWebhookPayload(urlSafePayload)
         addLog('webhook-parse', true, `回调解析成功：${JSON.stringify(data)}`)
       },
