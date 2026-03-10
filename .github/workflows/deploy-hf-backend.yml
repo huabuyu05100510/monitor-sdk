@@ -14,20 +14,34 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
 
-      - name: Push backend to HF Space
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Upload backend folder to HF Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          cd platform/backend
-          git init -b main
-          git config user.email "ci@github.com"
-          git config user.name "GitHub Actions"
-          git add .
-          git commit -m "Deploy from GitHub $(git -C ../.. rev-parse --short HEAD)"
-          git push --force \
-            https://huabuyu05100510:${HF_TOKEN}@huggingface.co/spaces/huabuyu05100510/monitor-platform-backend \
-            main
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          token = os.environ.get("HF_TOKEN", "")
+          if not token:
+              raise RuntimeError("HF_TOKEN secret is not set in GitHub repository secrets!")
+
+          api = HfApi(token=token)
+          api.upload_folder(
+              folder_path="platform/backend",
+              repo_id="huabuyu05100510/monitor-platform-backend",
+              repo_type="space",
+              commit_message=f"Deploy from GitHub Actions",
+              ignore_patterns=["node_modules/**", "dist/**", "*.db", "uploads/**"],
+          )
+          print("✅ Successfully deployed to HF Space!")
+          EOF
