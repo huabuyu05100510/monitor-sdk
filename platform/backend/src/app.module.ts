@@ -14,15 +14,28 @@ import { AnalysisModule } from './analysis/analysis.module'
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const useSqlite = config.get('DB_TYPE', 'sqlite') === 'sqlite'
-        if (useSqlite) {
+        // Priority: DATABASE_URL (Render/Heroku PG) > DB_TYPE config > SQLite
+        const databaseUrl = config.get<string>('DATABASE_URL')
+        if (databaseUrl) {
           return {
-            type: 'better-sqlite3',
-            database: config.get('SQLITE_PATH', './monitor.db'),
+            type: 'postgres',
+            url: databaseUrl,
+            ssl: { rejectUnauthorized: false }, // required for Render free PG
             autoLoadEntities: true,
             synchronize: true,
           } as any
         }
+
+        const useSqlite = config.get('DB_TYPE', 'sqlite') === 'sqlite'
+        if (useSqlite) {
+          return {
+            type: 'better-sqlite3',
+            database: config.get('SQLITE_PATH', '/tmp/monitor.db'),
+            autoLoadEntities: true,
+            synchronize: true,
+          } as any
+        }
+
         return {
           type: 'postgres',
           host: config.get('DB_HOST', 'localhost'),

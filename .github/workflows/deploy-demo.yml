@@ -49,6 +49,8 @@ jobs:
         run: pnpm --filter react-demo build
         env:
           VITE_BASE: /monitor-sdk/
+          # Point the demo at the Render backend (set this secret in GitHub repo settings)
+          VITE_DSN: ${{ secrets.VITE_DSN }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: monitor-platform-backend
+    runtime: docker
+    dockerfilePath: ./platform/backend/Dockerfile
+    dockerContext: ./platform/backend
+    healthCheckPath: /api/projects
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Database: either DATABASE_URL (attach a Render PG) or SQLite fallback
+      - key: SQLITE_PATH
+        value: /tmp/monitor.db
+      - key: SOURCEMAP_DIR
+        value: /tmp/sourcemaps
+      # Allow GitHub Pages + localhost
+      - key: CORS_ORIGIN
+        value: https://huabuyu05100510.github.io,http://localhost:3000,http://localhost:5173
+      # LLM — fill in the Render dashboard (Environment tab)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENAI_MODEL
+        value: qwen/qwen3-coder-next
