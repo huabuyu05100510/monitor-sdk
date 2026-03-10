@@ -120,6 +120,20 @@ function loadProductDetailModule() {
   })
 }
 
+/** 从前端缓存的 JWT payload 读取用户角色（用于页面权限控制）*/
+function parseUserRoleFromToken(): string {
+  // 模拟不同账号登录时前端解码到的 token payload
+  const payloads: (Record<string, any> | null)[] = [
+    { sub: 'user_1021', roles: { primary: 'editor', permissions: ['read', 'write'] } },
+    { sub: 'user_1022', roles: null },   // ← 新注册账号，roles 未初始化
+    { sub: 'user_1023' },                // ← SSO 接入账号，roles 字段缺失
+  ]
+  const idx = Math.floor(Date.now() / 3000) % payloads.length
+  const payload = payloads[idx]!
+  // BUG: roles 可能为 null 或缺失，直接访问 .primary 导致 TypeError
+  return payload.roles.primary.toUpperCase()
+}
+
 /** 查询商品实时库存（via XHR，兼容旧版 SDK）*/
 function queryRealtimeInventory(productId: string) {
   const xhr = new XMLHttpRequest()
@@ -215,6 +229,18 @@ export default function ErrorLab() {
       action: () => {
         const user = fetchCurrentUser()
         addLog('user-profile', true, `用户 ${user.name} 偏好：${user.profile.preferences.currency}`)
+      },
+    },
+    {
+      id: 'user-role',
+      group: '用户服务',
+      title: '获取用户权限',
+      subtitle: '从 JWT 缓存读取角色，用于路由鉴权',
+      icon: '🔑',
+      color: '#f56c6c',
+      action: () => {
+        const role = parseUserRoleFromToken()
+        addLog('user-role', true, `当前角色：${role}`)
       },
     },
     // ── 商品与库存 ──
