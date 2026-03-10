@@ -19,7 +19,8 @@ COPY src ./src
 RUN pnpm exec nest build
 
 ENV NODE_ENV=production
-ENV PORT=4000
-EXPOSE 4000
+# HF Spaces uses 7860; Render/local use 4000 — always driven by $PORT env var
+ENV PORT=7860
+EXPOSE 7860
 
 CMD ["node", "dist/main.js"]
