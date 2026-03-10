@@ -39,6 +39,15 @@ export class CodeReaderService {
     for (const frame of frames) {
       if (!frame.resolved || !frame.source || frame.line == null) continue
 
+      // Skip frames that still point at production bundle files (unresolved by source map).
+      // A bundle file typically has a content-hash like: index-Ab3xYZ.js, main.1a2b3c.js
+      // A real source file looks like: src/App.tsx, components/Button.tsx
+      const looksLikeBundle = /[._-][a-zA-Z0-9]{6,}\.(js|mjs|cjs)$/.test(frame.source)
+      if (looksLikeBundle) {
+        this.logger.debug(`Skipping unresolved bundle frame: ${frame.source}`)
+        continue
+      }
+
       // Normalise: strip leading "/" so we can join with sourceRoot
       // e.g. "/src/App.tsx" → "src/App.tsx"
       const relPath = frame.source.replace(/^\/+/, '')

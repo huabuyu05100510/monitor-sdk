@@ -88,25 +88,40 @@ export class SourcemapsService {
    * Resolve a single minified stack frame to its original source location.
    */
   async resolveFrame(appId: string, version: string, frame: StackFrame): Promise<ResolvedFrame> {
+    // Detect Vite/Rollup production bundles by content-hash in filename.
+    // Vite hashes are 8 chars from [a-zA-Z0-9_-], separated by [-_] from the base name.
+    // Examples: index-f_wB0Uxy.js, main-Ab3xYZ12.js
+    // Underscore can appear inside the hash, so old regex [.-][a-zA-Z0-9]{6,} was wrong.
+    const basename = path.basename(frame.filename).split('?')[0]
+    const isBundle = /[-_][a-zA-Z0-9_-]{6,}\.(js|mjs|cjs)$/.test(basename)
+
     // Dev server source files (e.g. http://localhost:3000/src/App.tsx) are already
     // pointing at the original source — no source map lookup needed.
-    const isDevSourceFile = /\.(tsx?|jsx?)$/.test(frame.filename) &&
-      !frame.filename.match(/[.-][a-zA-Z0-9]{6,}\.(js|ts)x?$/) // no hash = not a bundle
+    const isDevSourceFile = !isBundle && /\.(tsx?|jsx?)$/.test(frame.filename)
     if (isDevSourceFile) {
       // Strip the origin so the path is clean: "src/App.tsx:50:10"
       const cleanSource = frame.filename.replace(/^https?:\/\/[^/]+/, '')
       return { source: cleanSource, line: frame.line, column: frame.column, name: null, resolved: true }
     }
 
-    const bundleFilename = path.basename(frame.filename).split('?')[0]
+    const bundleFilename = basename // already stripped query string
 
-    // 1. Check DB record for this exact version
-    // 2. If not found, fall back to "latest" so users don't have to re-upload for every dev build
-    let record = await this.repo.findOneBy({ appId, version, filename: bundleFilename })
+    // DB lookup: try both "index-hash.js" and "index-hash.js.map" (upload may use either naming)
+    const lookupNames = [bundleFilename, `${bundleFilename}.map`]
+    let record: Sourcemap | null = null
+    for (const name of lookupNames) {
+      record = await this.repo.findOneBy({ appId, version, filename: name }) ?? null
+      if (record) break
+    }
+
+    // Fall back to "latest" version so users don't have to re-upload for every dev build
     if (!record && version !== 'latest') {
-      record = await this.repo.findOneBy({ appId, version: 'latest', filename: bundleFilename })
-      if (record) {
-        this.logger.debug(`Fell back to "latest" sourcemap for ${bundleFilename}`)
+      for (const name of lookupNames) {
+        record = await this.repo.findOneBy({ appId, version: 'latest', filename: name }) ?? null
+        if (record) {
+          this.logger.debug(`Fell back to "latest" sourcemap for ${bundleFilename}`)
+          break
+        }
       }
     }
 
@@ -130,8 +145,25 @@ export class SourcemapsService {
         return { source: frame.filename, line: frame.line, column: frame.column, name: null, resolved: false }
       }
 
+      // Normalize the resolved source path.
+      // source-map-js returns raw values like "../../src/App.tsx".
+      // Resolve against a virtual path so we get something clean like "src/App.tsx".
+      let resolvedSource = pos.source as string
+      if (resolvedSource.startsWith('../') || resolvedSource.startsWith('./')) {
+        // Virtual base: the bundle lives at dist/assets/bundle.js
+        // Source map sources are relative to that, so resolve them:
+        resolvedSource = path.posix.normalize(
+          path.posix.join('/dist/assets', resolvedSource),
+        )
+        // Trim leading "/dist/assets/../../" → clean path like "/src/App.tsx"
+      }
+      // Filter out node_modules after resolution
+      if (resolvedSource.includes('node_modules')) {
+        return { source: frame.filename, line: frame.line, column: frame.column, name: null, resolved: false }
+      }
+
       return {
-        source: pos.source,
+        source: resolvedSource,
         line: pos.line,
         column: pos.column,
         name: pos.name,
