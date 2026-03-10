@@ -14,11 +14,13 @@ const ctxCapturePlugin = {
   },
 }
 
+// In production (GitHub Pages) there's no backend — events are captured locally only.
+// Set VITE_DSN env var (or run locally) to report to the Monitor Platform backend.
+const dsn = import.meta.env.VITE_DSN ?? 'http://localhost:4000/api/errors/report'
+
 init({
   appId: 'react-demo',
-  // Points to the Monitor Platform backend's report endpoint
-  dsn: 'http://localhost:4000/api/errors/report',
-  // Flush quickly so events show up in the log right away
+  dsn,
   maxQueueSize: 1,
   flushInterval: 200,
   plugins: [ctxCapturePlugin],
