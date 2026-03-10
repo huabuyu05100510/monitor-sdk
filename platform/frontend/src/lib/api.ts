@@ -1,6 +1,12 @@
 import axios from 'axios'
 
-export const api = axios.create({ baseURL: '/api' })
+// Local dev: proxied via Vite to localhost:4000
+// GitHub Pages: set VITE_API_BASE to your backend URL, e.g. http://localhost:4000
+const apiBase = import.meta.env.VITE_API_BASE
+  ? `${import.meta.env.VITE_API_BASE}/api`
+  : '/api'
+
+export const api = axios.create({ baseURL: apiBase })
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
