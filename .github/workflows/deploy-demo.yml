@@ -70,7 +70,8 @@ jobs:
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${MAPS_DIR}/${SHORT_SHA}/" "${MAPS_DIR}/latest/"
+          # -f forces add even if the path matches a .gitignore rule
+          git add -f "${MAPS_DIR}/${SHORT_SHA}/" "${MAPS_DIR}/latest/"
 
           if git diff --cached --quiet; then
             echo "Source maps unchanged, skipping commit."

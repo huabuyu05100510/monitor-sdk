@@ -8,8 +8,10 @@ dist
 
 # Backend
 platform/backend/.env
-platform/backend/uploads/
-# Source maps committed by CI must be tracked (exception to the uploads/ rule above)
+# Ignore everything inside uploads/ EXCEPT the sourcemaps subdirectory.
+# Note: "uploads/" would ignore the whole directory (making exceptions impossible).
+# "uploads/*" ignores its contents but allows "!uploads/sourcemaps/" exceptions to work.
+platform/backend/uploads/*
 !platform/backend/uploads/sourcemaps/
 !platform/backend/uploads/sourcemaps/**
 platform/backend/*.db
