@@ -52,6 +52,13 @@ jobs:
           VITE_BASE: /monitor-sdk/
           VITE_DSN: ${{ secrets.VITE_DSN }}
 
+      - name: Save source maps as artifact (for local backend upload)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sourcemaps-${{ github.sha }}
+          path: demos/react-demo/dist/assets/*.map
+          retention-days: 30
+
       - name: Remove source maps from deployment
         run: find demos/react-demo/dist -name "*.map" -delete
 
