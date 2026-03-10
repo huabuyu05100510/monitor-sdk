@@ -2,379 +2,475 @@ import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { MonitorErrorBoundary } from '@monit/react'
 
-// ── 各类真实错误场景 ──────────────────────────────────────────────────────────
+// ── 业务数据模型 ────────────────────────────────────────────────────────────
 
-/** 场景 1：访问 null 对象属性 */
-function scene_nullRef() {
-  const user = null as unknown as { name: string }
-  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-  user.name // TypeError: Cannot read properties of null
-}
-
-/** 场景 2：数组越界 + 链式调用 */
-function scene_arrayChain() {
-  const list: string[] = []
-  list[99].toUpperCase() // TypeError: Cannot read properties of undefined
-}
-
-/** 场景 3：JSON.parse 非法字符串 */
-function scene_jsonParse() {
-  JSON.parse('{ bad json }') // SyntaxError
-}
-
-/** 场景 4：深层递归导致堆栈溢出 */
-function scene_stackOverflow() {
-  function recurse(n: number): number {
-    return recurse(n + 1)
+interface User {
+  id: number
+  name: string
+  email: string
+  profile: {
+    avatar: string
+    preferences: { currency: string; language: string }
   }
-  recurse(0) // RangeError: Maximum call stack size exceeded
 }
 
-/** 场景 5：类型断言引发的运行时错误 */
-function scene_typeAssertion() {
-  const data = { value: '42' } as unknown as { value: { toFixed: () => string } }
-  data.value.toFixed() // TypeError
+interface CartItem {
+  productId: string
+  name: string
+  price: number
+  quantity: number
+  discount?: number
 }
 
-/** 场景 6：异步 reject 链未捕获 */
-function scene_asyncReject() {
-  async function fetchUser(id: number) {
-    if (id < 0) throw new Error(`用户 ID 无效：${id}`)
-    return { id, name: 'Alice' }
+interface Order {
+  id: string
+  userId: number
+  items: CartItem[]
+  couponCode?: string
+  createdAt: string
+}
+
+interface Product {
+  id: string
+  name: string
+  specs: { weight: number; dimensions: string }
+  inventory: { available: number; reserved: number }
+}
+
+// ── 业务逻辑层（含真实 bug）────────────────────────────────────────────────
+
+/** 获取当前登录用户信息，用于顶部导航和个人设置 */
+function fetchCurrentUser(): User {
+  // 模拟网络请求返回：偶发用户数据还未同步时返回 null
+  const responses: (User | null)[] = [
+    { id: 1021, name: '李明', email: 'liming@company.com',
+      profile: { avatar: '/avatars/1021.png', preferences: { currency: 'CNY', language: 'zh-CN' } } },
+    null,   // ← 用户 token 过期时后端返回 null，前端未做空判断
+    { id: 1022, name: '王芳', email: 'wangfang@company.com',
+      profile: { avatar: '/avatars/1022.png', preferences: { currency: 'CNY', language: 'zh-CN' } } },
+  ]
+  const idx = Math.floor(Date.now() / 1000) % responses.length
+  const user = responses[idx] as User
+  // BUG: 直接访问 user.profile，当 user 为 null 时崩溃
+  return { ...user, profile: { ...user.profile } }
+}
+
+/** 计算订单最终价格（含阶梯折扣） */
+function calculateOrderTotal(items: CartItem[], memberLevel: number): number {
+  if (items.length === 0) return 0
+  // BUG: 递归折扣计算，当 memberLevel 异常时无限递归
+  function applyDiscount(price: number, level: number): number {
+    if (level <= 0) return price
+    return applyDiscount(price * 0.95, level - 1)  // 每级折 5%，level 未做上限校验
   }
-  fetchUser(-1) // unhandledrejection
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  return applyDiscount(subtotal, memberLevel)
 }
 
-/** 场景 7：动态导入不存在的模块（用绝对 URL 避免构建报错）*/
-function scene_dynamicImport() {
-  // Use an absolute URL so Vite won't try to bundle it at compile time
-  const fakeUrl = window.location.origin + '/non-existent-chunk-abc123.js'
-  import(/* @vite-ignore */ fakeUrl).catch(() => {
-    Promise.reject(new Error('动态模块加载失败：chunk 不存在或版本过期'))
+/** 解析优惠券服务端返回的配置 */
+function parseCouponConfig(rawResponse: string): { discount: number; minOrder: number } {
+  // BUG: 后端偶发返回截断的 JSON（网络超时导致），前端未做容错
+  const config = JSON.parse(rawResponse)
+  return { discount: config.discount_rate, minOrder: config.min_order_amount }
+}
+
+/** 获取购物车中指定商品的库存状态 */
+function getItemInventoryStatus(cartItems: CartItem[], productId: string): string {
+  // BUG: 当 cartItems 为空数组或 find 返回 undefined 时，直接访问属性崩溃
+  const item = cartItems.find(i => i.productId === productId)
+  const available = (item as CartItem).quantity  // 未判断 undefined
+  return available > 0 ? '有货' : '缺货'
+}
+
+/** 格式化商品重量展示 */
+function formatProductSpec(product: Product): string {
+  // BUG: product.specs 来自动态字段，某些商品该字段为 null（历史数据问题）
+  const weight = (product.specs as any).weight
+  return weight.toFixed(2) + ' kg'  // 当 weight 不是 number 时崩溃
+}
+
+/** 提交订单到支付服务 */
+async function submitOrderToPayment(order: Order): Promise<{ transactionId: string }> {
+  // BUG: 支付网关偶发超时，且 error 未被上层捕获
+  await new Promise<void>((_, reject) => {
+    setTimeout(() => reject(new Error('支付网关连接超时：gateway.pay-service.internal 无响应')), 80)
+  })
+  return { transactionId: 'TXN-' + order.id }
+}
+
+/** 同步用户行为数据到推荐引擎 */
+async function syncBehaviorToRecommender(userId: number, actions: string[]) {
+  // BUG: 推荐引擎 API 偶发 500，未捕获
+  const resp = await fetch(`https://httpbin.org/status/500`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, actions }),
+  })
+  if (!resp.ok) throw new Error(`推荐引擎同步失败：HTTP ${resp.status} — 用户 ${userId} 行为数据丢失`)
+}
+
+/** 加载商品详情页模块（按需加载） */
+function loadProductDetailModule() {
+  const version = 'v2.3.1'  // 部署时版本固定
+  const chunkUrl = window.location.origin + `/chunks/product-detail.${version}.js`
+  // BUG: CDN 上旧版本 chunk 已被清理，加载时 404
+  import(/* @vite-ignore */ chunkUrl).catch(() => {
+    Promise.reject(new Error(`模块加载失败：product-detail chunk 不存在（CDN 缓存已过期，版本 ${version}）`))
   })
 }
 
-/** 场景 8：fetch 请求超时（手动 AbortController）*/
-async function scene_fetchTimeout() {
-  const controller = new AbortController()
-  const tid = setTimeout(() => controller.abort(), 50)
-  try {
-    await fetch('https://httpbin.org/delay/10', { signal: controller.signal })
-  } catch (e) {
-    clearTimeout(tid)
-    throw new Error(`网络请求超时：${(e as Error).message}`)
-  }
-}
-
-/** 场景 9：XHR 状态码 500 */
-function scene_xhr500() {
+/** 查询商品实时库存（via XHR，兼容旧版 SDK）*/
+function queryRealtimeInventory(productId: string) {
   const xhr = new XMLHttpRequest()
-  xhr.open('GET', 'https://httpbin.org/status/500')
+  xhr.open('GET', `https://httpbin.org/status/503`)
   xhr.onload = () => {
     if (xhr.status >= 500) {
-      throw new Error(`XHR 服务器错误：HTTP ${xhr.status}`)
+      // BUG: 此处 throw 在 onload 回调中，不会被 try/catch 捕获
+      throw new Error(`库存服务不可用：HTTP ${xhr.status}，商品 ${productId} 库存查询失败`)
     }
   }
   xhr.send()
 }
 
-/** 场景 10：React 组件在 useEffect 中抛出（由 ErrorBoundary 捕获不了，走 window.onerror）*/
-function SceneUseEffectCrash() {
+// ── React 业务组件（含渲染 bug）──────────────────────────────────────────────
+
+/** 用户最近订单组件，在侧边栏展示 */
+function RecentOrdersWidget({ userId }: { userId: number }) {
   useEffect(() => {
+    // BUG: 订单历史 API 返回数据后异步解析，偶发解析失败
     setTimeout(() => {
-      throw new Error('useEffect 内部异步错误：组件已挂载后崩溃')
+      const rawData = Math.random() < 0.5
+        ? '{"orders": [{"id": "ORD-001"}]}'
+        : '{"orders": [{incomplete json'  // 后端偶发截断
+      JSON.parse(rawData)  // 抛出异常，不在 React 渲染周期内，ErrorBoundary 无法捕获
     }, 100)
-  }, [])
-  return <span style={{ color: '#67c23a', fontSize: 13 }}>已触发（100ms 后报错）</span>
+  }, [userId])
+
+  return (
+    <span style={{ fontSize: 13, color: '#67c23a' }}>
+      用户 {userId} 的订单记录加载中…
+    </span>
+  )
 }
 
-/** 场景 11：React 渲染时崩溃（ErrorBoundary 捕获）*/
-function SceneRenderCrash({ active }: { active: boolean }) {
-  if (active) {
-    const arr = null as unknown as string[]
-    return <div>{arr.join(', ')}</div>
-  }
-  return <span style={{ color: '#67c23a', fontSize: 13 }}>组件正常渲染</span>
+/** 商品价格卡片，依赖后端返回的商品对象 */
+function ProductPriceCard({ product }: { product: Product | null }) {
+  if (!product) return null
+  // BUG: inventory 字段在某些历史商品中为 null（数据迁移遗留问题）
+  const available = (product.inventory as any).available
+  const reserved = (product.inventory as any).reserved
+  return (
+    <div style={{ fontSize: 13, color: '#303133' }}>
+      库存：{available - reserved} 件可用
+    </div>
+  )
 }
 
-/** 场景 12：无限循环导致页面卡死（带保护）*/
-function scene_infiniteLoop() {
-  const start = Date.now()
-  // 只跑 200ms，否则页面真的卡死
-  // eslint-disable-next-line no-empty
-  while (Date.now() - start < 200) {}
-  throw new Error('检测到无限循环（模拟 200ms 阻塞后抛出）')
-}
+// ── 操作面板 ─────────────────────────────────────────────────────────────────
 
-// ── 工具类型 ────────────────────────────────────────────────────────────────
-
-type SceneDef = {
+interface Op {
   id: string
-  category: string
+  group: string
   title: string
-  desc: string
+  subtitle: string
+  icon: string
   color: string
   action: () => void
-  isReact?: boolean
+  reactState?: 'useEffect' | 'render'
 }
 
-// ── 主页面 ───────────────────────────────────────────────────────────────────
-
 export default function ErrorLab() {
-  const [log, setLog] = useState<{ id: string; time: string; msg: string }[]>([])
-  const [effectCrash, setEffectCrash] = useState(false)
-  const [renderCrash, setRenderCrash] = useState(false)
+  const [log, setLog] = useState<{ id: string; time: string; ok: boolean; msg: string }[]>([])
+  const [showRecentOrders, setShowRecentOrders] = useState(false)
+  const [showProductCard, setShowProductCard] = useState(false)
   const [boundaryKey, setBoundaryKey] = useState(0)
   const logRef = useRef<HTMLDivElement>(null)
 
-  const addLog = (id: string, msg: string) => {
-    const time = new Date().toLocaleTimeString()
-    setLog(prev => [{ id, time, msg }, ...prev].slice(0, 30))
+  const addLog = (id: string, ok: boolean, msg: string) => {
+    setLog(prev => [{ id, time: new Date().toLocaleTimeString(), ok, msg }, ...prev].slice(0, 40))
   }
 
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = 0
-  }, [log])
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = 0 }, [log])
 
-  const trigger = (scene: SceneDef) => {
-    addLog(scene.id, `触发：${scene.title}`)
+  const run = (op: Op) => {
+    addLog(op.id, true, `执行：${op.title}`)
     try {
-      scene.action()
+      op.action()
     } catch (e) {
-      // For sync errors outside setTimeout, re-throw so window.onerror catches
+      addLog(op.id, false, (e as Error).message)
       setTimeout(() => { throw e }, 0)
     }
   }
 
-  const scenes: SceneDef[] = [
+  const ops: Op[] = [
+    // ── 用户管理 ──
     {
-      id: 'null-ref',
-      category: 'TypeError',
-      title: 'Null 引用',
-      desc: '访问 null 对象的属性 —— 最常见的运行时错误',
+      id: 'user-profile',
+      group: '用户服务',
+      title: '加载用户资料',
+      subtitle: '读取当前登录用户的偏好配置',
+      icon: '👤',
       color: '#f56c6c',
-      action: scene_nullRef,
+      action: () => {
+        const user = fetchCurrentUser()
+        addLog('user-profile', true, `用户 ${user.name} 偏好：${user.profile.preferences.currency}`)
+      },
     },
+    // ── 商品与库存 ──
     {
-      id: 'array-chain',
-      category: 'TypeError',
-      title: '数组越界链式调用',
-      desc: '访问越界索引后继续调用方法',
+      id: 'inventory',
+      group: '库存服务',
+      title: '查询商品库存',
+      subtitle: '实时查询指定 SKU 的可用库存',
+      icon: '📦',
       color: '#f56c6c',
-      action: scene_arrayChain,
+      action: () => {
+        // 购物车为空时（用户刚清空），仍然查询 → 崩溃
+        const emptyCart: CartItem[] = []
+        const status = getItemInventoryStatus(emptyCart, 'SKU-20481')
+        addLog('inventory', true, `库存状态：${status}`)
+      },
     },
     {
-      id: 'type-assert',
-      category: 'TypeError',
-      title: '错误类型断言',
-      desc: 'TypeScript 类型断言掩盖的运行时错误',
+      id: 'product-spec',
+      group: '库存服务',
+      title: '展示商品规格',
+      subtitle: '格式化商品重量和尺寸信息',
+      icon: '📐',
       color: '#f56c6c',
-      action: scene_typeAssertion,
+      action: () => {
+        // 历史商品 specs 字段为 null
+        const legacyProduct = {
+          id: 'P-0012',
+          name: '经典款背包',
+          specs: null,  // 数据迁移遗留
+          inventory: { available: 30, reserved: 5 },
+        } as unknown as Product
+        const spec = formatProductSpec(legacyProduct)
+        addLog('product-spec', true, `规格：${spec}`)
+      },
     },
     {
-      id: 'json-parse',
-      category: 'SyntaxError',
-      title: 'JSON 解析失败',
-      desc: 'JSON.parse 传入非法字符串',
+      id: 'realtime-inv',
+      group: '库存服务',
+      title: '实时同步库存',
+      subtitle: '通过库存中心 API 同步当前数量',
+      icon: '🔄',
+      color: '#909399',
+      action: () => queryRealtimeInventory('SKU-20481'),
+    },
+    // ── 订单与结算 ──
+    {
+      id: 'coupon',
+      group: '结算服务',
+      title: '应用优惠券',
+      subtitle: '解析优惠券配置并计算优惠金额',
+      icon: '🎫',
       color: '#e6a23c',
-      action: scene_jsonParse,
+      action: () => {
+        // 后端返回截断 JSON（超时场景）
+        const truncated = '{"discount_rate": 0.15, "min_order_am'
+        const config = parseCouponConfig(truncated)
+        addLog('coupon', true, `折扣率：${config.discount * 100}%`)
+      },
     },
     {
-      id: 'stack-overflow',
-      category: 'RangeError',
-      title: '堆栈溢出',
-      desc: '无限递归导致 Maximum call stack exceeded',
+      id: 'discount',
+      group: '结算服务',
+      title: '计算会员折扣',
+      subtitle: '按用户等级应用阶梯折扣规则',
+      icon: '💰',
       color: '#e6a23c',
-      action: scene_stackOverflow,
+      action: () => {
+        const items: CartItem[] = [{ productId: 'P-001', name: '商品A', price: 299, quantity: 2 }]
+        // memberLevel 从后端读取，未做范围校验，异常时为 Infinity
+        const level = Number(localStorage.getItem('memberLevel') ?? 'Infinity')
+        const total = calculateOrderTotal(items, level)
+        addLog('discount', true, `应付金额：¥${total.toFixed(2)}`)
+      },
     },
     {
-      id: 'infinite-loop',
-      category: 'RangeError',
-      title: '无限循环（模拟）',
-      desc: '200ms 阻塞后抛出，模拟长任务卡死',
-      color: '#e6a23c',
-      action: scene_infiniteLoop,
-    },
-    {
-      id: 'async-reject',
-      category: 'Promise',
-      title: '未捕获的异步拒绝',
-      desc: 'async 函数 throw —— unhandledrejection',
+      id: 'payment',
+      group: '结算服务',
+      title: '提交订单支付',
+      subtitle: '将订单推送至支付网关',
+      icon: '💳',
       color: '#9b59b6',
-      action: scene_asyncReject,
+      action: () => {
+        const order: Order = {
+          id: 'ORD-' + Date.now(),
+          userId: 1021,
+          items: [{ productId: 'P-001', name: '商品A', price: 299, quantity: 1 }],
+          createdAt: new Date().toISOString(),
+        }
+        submitOrderToPayment(order)  // 未 await，异常不会被当前 catch 拦截
+      },
     },
+    // ── 数据同步 ──
     {
-      id: 'dynamic-import',
-      category: 'Promise',
-      title: '动态模块加载失败',
-      desc: '导入不存在的模块 —— 模拟动态路由加载失败',
-      color: '#9b59b6',
-      action: scene_dynamicImport,
-    },
-    {
-      id: 'fetch-timeout',
-      category: 'Network',
-      title: 'Fetch 超时中断',
-      desc: 'AbortController 50ms 后取消请求',
+      id: 'recommender',
+      group: '数据服务',
+      title: '同步用户行为',
+      subtitle: '将浏览和点击记录推送至推荐引擎',
+      icon: '📊',
       color: '#409eff',
-      action: scene_fetchTimeout,
+      action: () => {
+        syncBehaviorToRecommender(1021, ['view:P-001', 'click:P-002', 'add_cart:P-003'])
+      },
     },
     {
-      id: 'xhr-500',
-      category: 'Network',
-      title: 'XHR 服务端 500',
-      desc: '请求返回 HTTP 500，onload 中抛出',
+      id: 'chunk-load',
+      group: '数据服务',
+      title: '加载商品详情页',
+      subtitle: '按需加载商品详情模块（code split）',
+      icon: '📱',
       color: '#409eff',
-      action: scene_xhr500,
+      action: loadProductDetailModule,
+    },
+    // ── React 组件 ──
+    {
+      id: 'recent-orders',
+      group: '前端组件',
+      title: '展示最近订单',
+      subtitle: '侧边栏订单历史 Widget（偶发解析失败）',
+      icon: '🧾',
+      color: '#f5365c',
+      action: () => setShowRecentOrders(true),
+      reactState: 'useEffect',
     },
     {
-      id: 'use-effect-crash',
-      category: 'React',
-      title: 'useEffect 异步崩溃',
-      desc: 'useEffect 内 setTimeout 抛出，ErrorBoundary 无法捕获',
+      id: 'product-card',
+      group: '前端组件',
+      title: '渲染商品价格卡',
+      subtitle: '展示商品库存价格卡片（历史数据兼容问题）',
+      icon: '🛍️',
       color: '#f5365c',
-      action: () => setEffectCrash(true),
-      isReact: true,
-    },
-    {
-      id: 'render-crash',
-      category: 'React',
-      title: 'render 阶段崩溃',
-      desc: '组件渲染时访问 null，被 ErrorBoundary 捕获',
-      color: '#f5365c',
-      action: () => setRenderCrash(true),
-      isReact: true,
+      action: () => setShowProductCard(true),
+      reactState: 'render',
     },
   ]
 
-  const categories = ['TypeError', 'SyntaxError', 'RangeError', 'Promise', 'Network', 'React']
-  const categoryColors: Record<string, string> = {
-    TypeError: '#fef0f0',
-    SyntaxError: '#fdf6ec',
-    RangeError: '#fdf6ec',
-    Promise: '#f0f0fe',
-    Network: '#ecf5ff',
-    React: '#fff0f3',
+  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '前端组件']
+  const groupColor: Record<string, string> = {
+    '用户服务': '#fef0f0',
+    '库存服务': '#fdf6ec',
+    '结算服务': '#f0f0fe',
+    '数据服务': '#ecf5ff',
+    '前端组件': '#fff0f3',
   }
 
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#f0f2f5',
-      padding: '28px 24px',
+      background: '#f5f7fa',
+      padding: '24px',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       boxSizing: 'border-box',
     }}>
-      <div style={{ maxWidth: 960, margin: '0 auto' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto' }}>
 
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
           <div>
-            <h1 style={{ margin: '0 0 4px', fontSize: 22, color: '#303133', fontWeight: 700 }}>
-              🧪 错误场景实验室
+            <h1 style={{ margin: '0 0 4px', fontSize: 20, color: '#1d2129', fontWeight: 700 }}>
+              业务操作控制台
             </h1>
-            <p style={{ margin: 0, color: '#909399', fontSize: 13 }}>
-              点击场景卡片触发真实错误，通过监控平台进行 AI 根因分析
+            <p style={{ margin: 0, color: '#86909c', fontSize: 13 }}>
+              电商平台 · 运营管理后台 v2.3
             </p>
           </div>
           <Link to="/" style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            color: '#606266', fontSize: 13, textDecoration: 'none',
-            border: '1px solid #dcdfe6', borderRadius: 6, padding: '6px 12px',
-            background: '#fff',
+            color: '#86909c', fontSize: 13, textDecoration: 'none',
+            border: '1px solid #e5e6eb', borderRadius: 6, padding: '5px 12px', background: '#fff',
           }}>
-            ← 返回 Demo
+            ← 返回
           </Link>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, alignItems: 'start' }}>
-          {/* Left: Scene Cards */}
-          <div>
-            {categories.map(cat => {
-              const catScenes = scenes.filter(s => s.category === cat)
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20, alignItems: 'start' }}>
+
+          {/* Left: Operation Groups */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {groups.map(group => {
+              const groupOps = ops.filter(o => o.group === group)
               return (
-                <div key={cat} style={{
-                  background: '#fff',
-                  borderRadius: 10,
-                  padding: 16,
-                  marginBottom: 16,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                <div key={group} style={{
+                  background: '#fff', borderRadius: 10,
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden',
                 }}>
                   <div style={{
-                    display: 'inline-block', fontSize: 11, fontWeight: 600,
-                    padding: '2px 8px', borderRadius: 4, marginBottom: 12,
-                    background: categoryColors[cat] ?? '#f5f5f5', color: '#606266',
+                    padding: '10px 16px', background: groupColor[group] ?? '#f9f9f9',
+                    borderBottom: '1px solid #f2f3f5',
+                    fontSize: 12, fontWeight: 600, color: '#4e5969',
                   }}>
-                    {cat}
+                    {group}
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {catScenes.map(scene => (
-                      <div key={scene.id}>
-                        {/* useEffect 崩溃：挂载组件后自动触发 */}
-                        {scene.id === 'use-effect-crash' && effectCrash && (
-                          <SceneUseEffectCrash />
+                  <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {groupOps.map(op => (
+                      <div key={op.id}>
+                        {/* React 组件预览区 */}
+                        {op.id === 'recent-orders' && showRecentOrders && (
+                          <div style={{ marginBottom: 6, padding: '8px 12px', background: '#f9f9f9', borderRadius: 6 }}>
+                            <RecentOrdersWidget userId={1021} />
+                          </div>
                         )}
-                        {/* render 崩溃：用 ErrorBoundary 包裹 */}
-                        {scene.id === 'render-crash' && (
+                        {op.id === 'product-card' && (
                           <div style={{ marginBottom: 6 }}>
                             <MonitorErrorBoundary
                               key={boundaryKey}
                               fallback={
                                 <div style={{
-                                  background: '#fef0f0', border: '1px solid #fde2e2',
-                                  borderRadius: 6, padding: '8px 12px', color: '#f56c6c', fontSize: 12,
+                                  padding: '8px 12px', background: '#fff7e6',
+                                  border: '1px solid #ffe7ba', borderRadius: 6,
+                                  fontSize: 12, color: '#d46b08',
                                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                                 }}>
-                                  <span>⚠ 渲染崩溃已被 ErrorBoundary 捕获</span>
-                                  <button onClick={() => { setRenderCrash(false); setBoundaryKey(k => k + 1) }}
-                                    style={{ background: '#67c23a', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>
-                                    重置
+                                  <span>组件异常：商品数据格式不兼容</span>
+                                  <button onClick={() => { setShowProductCard(false); setBoundaryKey(k => k + 1) }}
+                                    style={{ background: '#fa8c16', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>
+                                    重试
                                   </button>
                                 </div>
                               }
                             >
-                              <SceneRenderCrash active={renderCrash} />
+                              {showProductCard
+                                ? <ProductPriceCard product={{ id: 'P-0012', name: '经典款背包', specs: { weight: 0.8, dimensions: '30x15x40cm' }, inventory: null as any }} />
+                                : <span style={{ fontSize: 12, color: '#c9cdd4' }}>点击按钮加载商品卡片</span>
+                              }
                             </MonitorErrorBoundary>
                           </div>
                         )}
+
                         <button
-                          onClick={() => trigger(scene)}
+                          onClick={() => run(op)}
                           style={{
                             width: '100%', textAlign: 'left',
-                            background: 'transparent', border: '1px solid #ebeef5',
+                            background: 'transparent', border: '1px solid #f2f3f5',
                             borderRadius: 8, padding: '10px 14px', cursor: 'pointer',
                             display: 'flex', alignItems: 'center', gap: 12,
                             transition: 'all 0.15s',
                           }}
                           onMouseEnter={e => {
-                            const el = e.currentTarget
-                            el.style.borderColor = scene.color
-                            el.style.background = scene.color + '0d'
+                            e.currentTarget.style.borderColor = op.color + '80'
+                            e.currentTarget.style.background = op.color + '08'
                           }}
                           onMouseLeave={e => {
-                            const el = e.currentTarget
-                            el.style.borderColor = '#ebeef5'
-                            el.style.background = 'transparent'
+                            e.currentTarget.style.borderColor = '#f2f3f5'
+                            e.currentTarget.style.background = 'transparent'
                           }}
                         >
-                          <div style={{
-                            width: 8, height: 8, borderRadius: '50%',
-                            background: scene.color, flexShrink: 0,
-                          }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#303133', marginBottom: 2 }}>
-                              {scene.title}
-                            </div>
-                            <div style={{ fontSize: 11, color: '#909399', lineHeight: 1.4 }}>
-                              {scene.desc}
+                          <span style={{ fontSize: 20, lineHeight: 1 }}>{op.icon}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#1d2129' }}>{op.title}</div>
+                            <div style={{ fontSize: 11, color: '#86909c', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {op.subtitle}
                             </div>
                           </div>
                           <span style={{
-                            fontSize: 11, color: scene.color,
-                            border: `1px solid ${scene.color}33`,
-                            borderRadius: 4, padding: '2px 6px', flexShrink: 0,
+                            fontSize: 11, padding: '2px 8px', borderRadius: 4, flexShrink: 0,
+                            background: op.color + '15', color: op.color, fontWeight: 500,
                           }}>
-                            触发
+                            执行
                           </span>
                         </button>
                       </div>
@@ -385,46 +481,46 @@ export default function ErrorLab() {
             })}
           </div>
 
-          {/* Right: Trigger Log */}
+          {/* Right: Operation Log */}
           <div style={{
-            background: '#1a1a2e', borderRadius: 10, padding: 16,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.12)', position: 'sticky', top: 24,
+            background: '#1d2129', borderRadius: 10,
+            boxShadow: '0 2px 12px rgba(0,0,0,0.15)', position: 'sticky', top: 24,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span style={{ color: '#c9d1d9', fontSize: 13, fontWeight: 600 }}>触发日志</span>
+            <div style={{
+              padding: '12px 16px', borderBottom: '1px solid #2d3440',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span style={{ color: '#c9cdd4', fontSize: 13, fontWeight: 600 }}>执行日志</span>
               {log.length > 0 && (
                 <button onClick={() => setLog([])}
-                  style={{ background: 'none', border: 'none', color: '#6e7681', fontSize: 11, cursor: 'pointer' }}>
+                  style={{ background: 'none', border: 'none', color: '#4e5969', fontSize: 11, cursor: 'pointer' }}>
                   清空
                 </button>
               )}
             </div>
-            <div ref={logRef} style={{ height: 420, overflowY: 'auto' }}>
+            <div ref={logRef} style={{ height: 480, overflowY: 'auto', padding: '8px 12px' }}>
               {log.length === 0 ? (
-                <div style={{ color: '#484f58', fontSize: 12, textAlign: 'center', marginTop: 40 }}>
-                  点击场景卡片触发错误
+                <div style={{ color: '#4e5969', fontSize: 12, textAlign: 'center', marginTop: 48 }}>
+                  点击操作按钮查看执行日志
                 </div>
-              ) : (
-                log.map((entry, i) => (
-                  <div key={i} style={{
-                    borderBottom: '1px solid #21262d', paddingBottom: 8, marginBottom: 8,
-                  }}>
-                    <div style={{ fontSize: 10, color: '#6e7681', marginBottom: 2 }}>{entry.time}</div>
-                    <div style={{ fontSize: 12, color: '#c9d1d9', fontFamily: 'monospace' }}>
-                      <span style={{ color: '#f85149' }}>[{entry.id}]</span>{' '}
-                      {entry.msg}
-                    </div>
+              ) : log.map((entry, i) => (
+                <div key={i} style={{
+                  padding: '7px 0', borderBottom: '1px solid #2d3440', fontSize: 12,
+                }}>
+                  <div style={{ color: '#4e5969', fontSize: 10, marginBottom: 2 }}>{entry.time}</div>
+                  <div style={{ color: entry.ok ? '#6ee7b7' : '#f87171', fontFamily: 'monospace', lineHeight: 1.5 }}>
+                    {!entry.ok && <span style={{ color: '#f87171' }}>✗ </span>}
+                    {entry.msg}
                   </div>
-                ))
-              )}
+                </div>
+              ))}
             </div>
             <div style={{
-              marginTop: 12, padding: '8px 10px', background: '#0d1117',
-              borderRadius: 6, fontSize: 11, color: '#6e7681', lineHeight: 1.5,
+              padding: '10px 16px', borderTop: '1px solid #2d3440',
+              fontSize: 11, color: '#4e5969', lineHeight: 1.6,
             }}>
-              触发后在{' '}
-              <span style={{ color: '#58a6ff' }}>localhost:5173</span>
-              {' '}监控平台查看 AI 分析结果
+              异常已上报至监控系统<br />
+              在 <span style={{ color: '#60a5fa' }}>localhost:5173</span> 查看 AI 分析
             </div>
           </div>
         </div>
