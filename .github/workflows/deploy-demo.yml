@@ -44,7 +44,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build SDK packages
-        run: pnpm --filter "@monit/*" build
+        run: pnpm --filter "./packages/**" build
 
       # ── React Demo → /monitor-sdk/ ──────────────────────────────────────────
       - name: Build React demo
