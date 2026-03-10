@@ -64,9 +64,12 @@ jobs:
       # ── Merge both into one artifact ────────────────────────────────────────
       - name: Assemble Pages artifact
         run: |
+          echo "=== demo dist ===" && ls demos/react-demo/dist/ || echo "MISSING"
+          echo "=== platform dist ===" && ls platform/frontend/dist/ || echo "MISSING"
           mkdir -p gh-pages/platform
           cp -r demos/react-demo/dist/. gh-pages/
           cp -r platform/frontend/dist/. gh-pages/platform/
+          echo "=== gh-pages structure ===" && find gh-pages -maxdepth 3 | head -30
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
