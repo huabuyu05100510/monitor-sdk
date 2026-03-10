@@ -1,6 +1,7 @@
 node_modules
 dist
 *.d.ts
+!platform/frontend/src/vite-env.d.ts
 *.d.ts.map
 *.tsbuildinfo
 .DS_Store
