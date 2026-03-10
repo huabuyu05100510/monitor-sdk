@@ -9,27 +9,27 @@ on:
       - '.github/workflows/deploy-demo.yml'
   workflow_dispatch:
 
-permissions:
-  contents: write   # needed to commit source maps back to repo
-  pages: write
-  id-token: write
-
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  # ── Job 1: build, commit source maps, produce Pages artifact ───────────────
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: write   # needed to commit source maps back to the repo
+
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Fetch full history so git push doesn't fail on fast-forward check
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,44 +54,53 @@ jobs:
           VITE_BASE: /monitor-sdk/
           # VITE_DSN is intentionally NOT embedded — configured at runtime via localStorage UI.
 
-      # ── Commit source maps to repo so local backend can read them after git pull ──
+      - name: Capture commit meta
+        id: meta
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Commit source maps to repo
         run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
+          SHORT_SHA="${{ steps.meta.outputs.sha }}"
           MAPS_DIR="platform/backend/uploads/sourcemaps/react-demo"
 
-          # Copy maps into backend uploads directory (versioned + latest alias)
           mkdir -p "${MAPS_DIR}/${SHORT_SHA}"
           mkdir -p "${MAPS_DIR}/latest"
           cp demos/react-demo/dist/assets/*.map "${MAPS_DIR}/${SHORT_SHA}/"
           cp demos/react-demo/dist/assets/*.map "${MAPS_DIR}/latest/"
 
-          # Configure git
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add "${MAPS_DIR}/${SHORT_SHA}/" "${MAPS_DIR}/latest/"
 
-          # Only commit if there are changes
           if git diff --cached --quiet; then
             echo "Source maps unchanged, skipping commit."
           else
             git commit -m "ci: update source maps for react-demo@${SHORT_SHA} [skip ci]"
-            git push
+            # Pull + rebase in case another commit landed between checkout and push
+            git pull --rebase origin master
+            git push origin master
           fi
 
-      # Remove maps from the Pages artifact (never expose them publicly)
-      - name: Remove source maps from deployment
+      - name: Remove source maps from Pages deployment
         run: find demos/react-demo/dist -name "*.map" -delete
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: demos/react-demo/dist
 
+  # ── Job 2: deploy to GitHub Pages (separate permissions scope) ─────────────
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
