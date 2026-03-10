@@ -134,6 +134,27 @@ function parseUserRoleFromToken(): string {
   return payload.roles.primary.toUpperCase()
 }
 
+/** 构建快递面单：将收件人各字段拼成固定宽度标签 */
+function buildShippingLabel(address: Record<string, string>): string {
+  const fields = ['recipientName', 'province', 'city', 'district', 'street', 'zipCode']
+  // BUG: address 来自用户填写的表单缓存，偶发某个字段缺失（undefined）
+  // reduce 拼接时 undefined + string = 'undefinedxxx'，最终 zipCode 字段调 padStart 崩溃
+  return fields.reduce((label, key) => {
+    const val: string = address[key]  // 未做 ?? '' 兜底
+    return label + val.padStart(12)   // val 为 undefined 时：TypeError
+  }, '')
+}
+
+/** 刷新会话 Token 并计算剩余有效期 */
+function refreshSessionToken(): string {
+  // BUG: 后端 /auth/refresh 偶发返回字符串格式的时间戳（历史接口兼容问题）
+  const expiresAt: any = '1741612800'   // 应为 number，实为 string（接口未做类型校验）
+  const remainSecs = (expiresAt - Date.now()) / 1000  // string - number = NaN
+  // NaN.toFixed() 抛出 TypeError：Cannot read properties of NaN (reading 'toFixed')
+  const display = remainSecs.toFixed(0)
+  return `Token 将在 ${display} 秒后过期`
+}
+
 /** 搜索商品列表并高亮关键词 */
 function searchProducts(keyword: string): string[] {
   const catalog = ['iPhone 15 Pro Max', 'AirPods Pro 2', 'MacBook Air M3', 'iPad mini 6', 'Apple Watch Ultra 2']
@@ -375,6 +396,33 @@ export default function ErrorLab() {
       color: '#409eff',
       action: loadProductDetailModule,
     },
+    // ── 物流服务 ──
+    {
+      id: 'shipping-label',
+      group: '物流服务',
+      title: '生成快递面单',
+      subtitle: '将收件地址格式化为标准面单字段',
+      icon: '🚚',
+      color: '#fd79a8',
+      action: () => {
+        // district 字段来自旧版地址库，部分记录未迁移（缺失）
+        const addr = { recipientName: '张三', province: '广东省', city: '深圳市', street: '科技园南路' }
+        const label = buildShippingLabel(addr)
+        addLog('shipping-label', true, `面单：${label}`)
+      },
+    },
+    {
+      id: 'session-refresh',
+      group: '物流服务',
+      title: '刷新会话 Token',
+      subtitle: '检查 Token 有效期并在到期前自动续期',
+      icon: '🔐',
+      color: '#fd79a8',
+      action: () => {
+        const msg = refreshSessionToken()
+        addLog('session-refresh', true, msg)
+      },
+    },
     // ── 配置服务 ──
     {
       id: 'search-product',
@@ -425,12 +473,13 @@ export default function ErrorLab() {
     },
   ]
 
-  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '配置服务', '前端组件']
+  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '物流服务', '配置服务', '前端组件']
   const groupColor: Record<string, string> = {
     '用户服务': '#fef0f0',
     '库存服务': '#fdf6ec',
     '结算服务': '#f0f0fe',
     '数据服务': '#ecf5ff',
+    '物流服务': '#fff0f8',
     '配置服务': '#e6f9f5',
     '前端组件': '#fff0f3',
   }
