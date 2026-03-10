@@ -134,6 +134,27 @@ function parseUserRoleFromToken(): string {
   return payload.roles.primary.toUpperCase()
 }
 
+/** 搜索商品列表并高亮关键词 */
+function searchProducts(keyword: string): string[] {
+  const catalog = ['iPhone 15 Pro Max', 'AirPods Pro 2', 'MacBook Air M3', 'iPad mini 6', 'Apple Watch Ultra 2']
+  // BUG: 直接用用户输入构建正则，若输入含 (、[、* 等特殊字符则抛 SyntaxError
+  const pattern = new RegExp(keyword, 'i')
+  return catalog.filter((p) => pattern.test(p))
+}
+
+/** 导出系统配置快照（用于调试信息上报）*/
+function exportConfigSnapshot(): string {
+  const config: Record<string, any> = {
+    version: '3.2.1',
+    environment: 'production',
+    features: { darkMode: true, betaSearch: false },
+    debug: { level: 'warn', traceId: 'abc-123' },
+  }
+  // BUG: 运维脚本将 config.meta.root 指向了自身（循环引用），JSON.stringify 崩溃
+  config.meta = { root: config, createdAt: Date.now() }
+  return JSON.stringify(config)  // TypeError: Converting circular structure to JSON
+}
+
 /** 查询商品实时库存（via XHR，兼容旧版 SDK）*/
 function queryRealtimeInventory(productId: string) {
   const xhr = new XMLHttpRequest()
@@ -354,6 +375,33 @@ export default function ErrorLab() {
       color: '#409eff',
       action: loadProductDetailModule,
     },
+    // ── 配置服务 ──
+    {
+      id: 'search-product',
+      group: '配置服务',
+      title: '搜索商品',
+      subtitle: '按关键词过滤商品列表，支持正则匹配',
+      icon: '🔍',
+      color: '#00b894',
+      action: () => {
+        // 搜索词来自用户输入历史缓存，偶发含正则特殊字符
+        const keyword = localStorage.getItem('lastSearch') ?? '(Pro|Air'  // 缺少闭合括号
+        const results = searchProducts(keyword)
+        addLog('search-product', true, `命中 ${results.length} 件：${results.join(', ')}`)
+      },
+    },
+    {
+      id: 'export-config',
+      group: '配置服务',
+      title: '导出配置快照',
+      subtitle: '将当前运行时配置序列化上报给监控系统',
+      icon: '📋',
+      color: '#00b894',
+      action: () => {
+        const snapshot = exportConfigSnapshot()
+        addLog('export-config', true, `配置已导出，大小 ${snapshot.length} bytes`)
+      },
+    },
     // ── React 组件 ──
     {
       id: 'recent-orders',
@@ -377,12 +425,13 @@ export default function ErrorLab() {
     },
   ]
 
-  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '前端组件']
+  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '配置服务', '前端组件']
   const groupColor: Record<string, string> = {
     '用户服务': '#fef0f0',
     '库存服务': '#fdf6ec',
     '结算服务': '#f0f0fe',
     '数据服务': '#ecf5ff',
+    '配置服务': '#e6f9f5',
     '前端组件': '#fff0f3',
   }
 
