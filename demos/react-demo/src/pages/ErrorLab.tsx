@@ -137,11 +137,9 @@ function parseUserRoleFromToken(): string {
 /** 构建快递面单：将收件人各字段拼成固定宽度标签 */
 function buildShippingLabel(address: Record<string, string>): string {
   const fields = ['recipientName', 'province', 'city', 'district', 'street', 'zipCode']
-  // BUG: address 来自用户填写的表单缓存，偶发某个字段缺失（undefined）
-  // reduce 拼接时 undefined + string = 'undefinedxxx'，最终 zipCode 字段调 padStart 崩溃
   return fields.reduce((label, key) => {
-    const val: string = address[key]  // 未做 ?? '' 兜底
-    return label + val.padStart(12)   // val 为 undefined 时：TypeError
+    const val = address[key] ?? ''  // ← 修复：兜底空字符串
+    return label + val.padStart(12)
   }, '')
 }
 
