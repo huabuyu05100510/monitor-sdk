@@ -52,6 +52,9 @@ jobs:
           VITE_BASE: /monitor-sdk/
           VITE_DSN: ${{ secrets.VITE_DSN }}
 
+      - name: Remove source maps from deployment
+        run: find demos/react-demo/dist -name "*.map" -delete
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 

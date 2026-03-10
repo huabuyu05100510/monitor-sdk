@@ -6,7 +6,9 @@ export default defineConfig({
   // GitHub Pages serves under /monitor-sdk/ — override with VITE_BASE for local dev
   base: process.env.VITE_BASE ?? '/monitor-sdk/',
   build: {
-    sourcemap: true,
+    // 'hidden' generates .map files for backend upload but omits the
+    // sourceMappingURL comment in the bundle, so browsers won't expose them.
+    sourcemap: 'hidden',
   },
   server: {
     port: 3000,
