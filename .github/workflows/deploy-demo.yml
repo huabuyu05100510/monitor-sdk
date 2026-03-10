@@ -50,7 +50,8 @@ jobs:
         run: pnpm build
         env:
           VITE_BASE: /monitor-sdk/
-          VITE_DSN: ${{ secrets.VITE_DSN }}
+          # VITE_DSN is intentionally NOT embedded in the bundle.
+          # The DSN is configured at runtime via the floating UI (localStorage).
 
       - name: Save source maps as artifact (for local backend upload)
         uses: actions/upload-artifact@v4
