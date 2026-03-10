@@ -155,11 +155,10 @@ function refreshSessionToken(): string {
 
 /** 生成发票单号（含退款场景）*/
 function generateInvoiceNumber(orderId: string, amount: number): string {
-  // BUG: 退款单 amount 为负数，Math.floor(Math.log10(Math.abs(amount))) 算出的 digits 正常，
-  // 但 prefix repeat 时 count = Math.floor(-amount / 100) 为负数 → RangeError
   const prefix = amount >= 0 ? 'INV' : 'REF'
-  const count = Math.floor(amount / 100)  // 退款时为负数
-  const padding = prefix.repeat(count)    // RangeError: Invalid count value: -3
+  // 修复：对 count 取 max(0, ...) 防止 repeat 接收负数
+  const count = Math.max(0, Math.floor(Math.abs(amount) / 100))
+  const padding = prefix.repeat(count)
   return `${padding}-${orderId}-${Date.now()}`
 }
 
