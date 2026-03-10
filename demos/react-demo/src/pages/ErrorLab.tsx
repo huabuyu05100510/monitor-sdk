@@ -165,10 +165,19 @@ function generateInvoiceNumber(orderId: string, amount: number): string {
 
 /** 解析第三方平台 Webhook 回调（Base64 编码的 payload）*/
 function parseWebhookPayload(encodedPayload: string): Record<string, unknown> {
-  // BUG: 支付平台使用 URL-safe Base64（- 替换 +，_ 替换 /），
-  // 浏览器 atob() 只接受标准 Base64，直接解码抛 InvalidCharacterError
-  const decoded = atob(encodedPayload)  // InvalidCharacterError: Invalid character in string
-  return JSON.parse(decoded)
+  // 修复：将 URL-safe Base64 转换为标准 Base64
+  const standardBase64 = encodedPayload
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .padEnd(encodedPayload.length + (4 - (encodedPayload.length % 4)) % 4, '=');
+  
+  try {
+    const decoded = atob(standardBase64);
+    return JSON.parse(decoded);
+  } catch (e) {
+    console.error('Failed to parse webhook payload:', e);
+    return {};
+  }
 }
 
 /** 搜索商品列表并高亮关键词 */
