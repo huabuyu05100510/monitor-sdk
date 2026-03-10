@@ -155,6 +155,24 @@ function refreshSessionToken(): string {
   return `Token 将在 ${display} 秒后过期`
 }
 
+/** 生成发票单号（含退款场景）*/
+function generateInvoiceNumber(orderId: string, amount: number): string {
+  // BUG: 退款单 amount 为负数，Math.floor(Math.log10(Math.abs(amount))) 算出的 digits 正常，
+  // 但 prefix repeat 时 count = Math.floor(-amount / 100) 为负数 → RangeError
+  const prefix = amount >= 0 ? 'INV' : 'REF'
+  const count = Math.floor(amount / 100)  // 退款时为负数
+  const padding = prefix.repeat(count)    // RangeError: Invalid count value: -3
+  return `${padding}-${orderId}-${Date.now()}`
+}
+
+/** 解析第三方平台 Webhook 回调（Base64 编码的 payload）*/
+function parseWebhookPayload(encodedPayload: string): Record<string, unknown> {
+  // BUG: 支付平台使用 URL-safe Base64（- 替换 +，_ 替换 /），
+  // 浏览器 atob() 只接受标准 Base64，直接解码抛 InvalidCharacterError
+  const decoded = atob(encodedPayload)  // InvalidCharacterError: Invalid character in string
+  return JSON.parse(decoded)
+}
+
 /** 搜索商品列表并高亮关键词 */
 function searchProducts(keyword: string): string[] {
   const catalog = ['iPhone 15 Pro Max', 'AirPods Pro 2', 'MacBook Air M3', 'iPad mini 6', 'Apple Watch Ultra 2']
@@ -423,6 +441,35 @@ export default function ErrorLab() {
         addLog('session-refresh', true, msg)
       },
     },
+    // ── 财务服务 ──
+    {
+      id: 'invoice-gen',
+      group: '财务服务',
+      title: '生成退款发票',
+      subtitle: '为退款订单生成财务流水单号',
+      icon: '🧾',
+      color: '#6c5ce7',
+      action: () => {
+        // 退款金额为负数，正常业务场景
+        const no = generateInvoiceNumber('ORD-20240318-9921', -350)
+        addLog('invoice-gen', true, `发票号：${no}`)
+      },
+    },
+    {
+      id: 'webhook-parse',
+      group: '财务服务',
+      title: '解析支付回调',
+      subtitle: '处理第三方支付平台的 Webhook 通知',
+      icon: '📨',
+      color: '#6c5ce7',
+      action: () => {
+        // 支付宝/微信回调使用 URL-safe Base64，含 - 和 _ 字符
+        const urlSafePayload = 'eyJvcmRlcl9pZCI6Ik9SRC0yMDI0MDMxOC05OTIxIiwiYW1vdW50IjozNTAsInN0YXR1cyI6InN1Y2Nlc3MifQ=='
+          .replace(/\+/g, '-').replace(/\//g, '_')
+        const data = parseWebhookPayload(urlSafePayload)
+        addLog('webhook-parse', true, `回调解析成功：${JSON.stringify(data)}`)
+      },
+    },
     // ── 配置服务 ──
     {
       id: 'search-product',
@@ -473,13 +520,14 @@ export default function ErrorLab() {
     },
   ]
 
-  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '物流服务', '配置服务', '前端组件']
+  const groups = ['用户服务', '库存服务', '结算服务', '数据服务', '物流服务', '财务服务', '配置服务', '前端组件']
   const groupColor: Record<string, string> = {
     '用户服务': '#fef0f0',
     '库存服务': '#fdf6ec',
     '结算服务': '#f0f0fe',
     '数据服务': '#ecf5ff',
     '物流服务': '#fff0f8',
+    '财务服务': '#f3f0fe',
     '配置服务': '#e6f9f5',
     '前端组件': '#fff0f3',
   }
