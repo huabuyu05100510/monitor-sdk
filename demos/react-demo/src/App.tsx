@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { MonitorErrorBoundary } from '@monit/react'
 import EventLog from './EventLog'
 
@@ -203,13 +204,23 @@ export default function App() {
     >
       <div style={{ maxWidth: 860, margin: '0 auto' }}>
         {/* Header */}
-        <div style={{ marginBottom: 28 }}>
-          <h1 style={{ margin: '0 0 6px', fontSize: 24, color: '#303133', fontWeight: 700 }}>
-            Monitor SDK — React Demo
-          </h1>
-          <p style={{ margin: 0, color: '#606266', fontSize: 14 }}>
-            点击下方按钮触发各类监控事件，实时查看 SDK 的捕获与上报结果
-          </p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
+          <div>
+            <h1 style={{ margin: '0 0 6px', fontSize: 24, color: '#303133', fontWeight: 700 }}>
+              Monitor SDK — React Demo
+            </h1>
+            <p style={{ margin: 0, color: '#606266', fontSize: 14 }}>
+              点击下方按钮触发各类监控事件，实时查看 SDK 的捕获与上报结果
+            </p>
+          </div>
+          <Link to="/lab" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: '#303133', color: '#fff', textDecoration: 'none',
+            borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}>
+            🧪 错误场景实验室
+          </Link>
         </div>
 
         {/* Trigger Panel */}

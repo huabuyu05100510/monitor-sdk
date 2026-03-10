@@ -1,10 +1,12 @@
 import './eventCapture'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { HashRouter, Routes, Route } from 'react-router-dom'
 import { init } from '@monit/browser'
 import { setErrorBoundaryContext } from '@monit/react'
 import type { MonitorContext } from '@monit/browser'
 import App from './App'
+import ErrorLab from './pages/ErrorLab'
 
 // Capture ctx from plugins so MonitorErrorBoundary can report React errors
 const ctxCapturePlugin = {
@@ -32,6 +34,11 @@ init({
 const root = document.getElementById('root')!
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <HashRouter>
+      <Routes>
+        <Route path="/" element={<App />} />
+        <Route path="/lab" element={<ErrorLab />} />
+      </Routes>
+    </HashRouter>
   </StrictMode>,
 )
