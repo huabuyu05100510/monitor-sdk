@@ -58,13 +58,14 @@ function fetchCurrentUser(): User {
 /** 计算订单最终价格（含阶梯折扣） */
 function calculateOrderTotal(items: CartItem[], memberLevel: number): number {
   if (items.length === 0) return 0
-  // BUG: 递归折扣计算，当 memberLevel 异常时无限递归
+  // 修复：限制 memberLevel 范围，防止负数或过大值导致问题
+  const safeLevel = Math.max(0, Math.min(memberLevel, 20)) // 假设最大折扣层级为20
   function applyDiscount(price: number, level: number): number {
     if (level <= 0) return price
-    return applyDiscount(price * 0.95, level - 1)  // 每级折 5%，level 未做上限校验
+    return applyDiscount(price * 0.95, level - 1)
   }
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  return applyDiscount(subtotal, memberLevel)
+  return applyDiscount(subtotal, safeLevel)
 }
 
 /** 解析优惠券服务端返回的配置 */
