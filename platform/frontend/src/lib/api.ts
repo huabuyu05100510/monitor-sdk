@@ -1,12 +1,35 @@
 import axios from 'axios'
 
-// Local dev: proxied via Vite to localhost:4000
-// GitHub Pages: set VITE_API_BASE to your backend URL, e.g. http://localhost:4000
-const apiBase = import.meta.env.VITE_API_BASE
-  ? `${import.meta.env.VITE_API_BASE}/api`
-  : '/api'
+const LS_KEY = 'MONITOR_API_BASE'
 
-export const api = axios.create({ baseURL: apiBase })
+/** 读取当前生效的后端根地址（无 /api 后缀） */
+export function getApiBase(): string {
+  // 1. localStorage 运行时配置（最优先）
+  const fromStorage = localStorage.getItem(LS_KEY)
+  if (fromStorage) return fromStorage.replace(/\/$/, '')
+  // 2. 构建时注入的环境变量
+  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE.replace(/\/$/, '')
+  // 3. 本地开发默认走 Vite proxy（/api → localhost:4000）
+  return ''
+}
+
+/** 更新后端地址并刷新页面使配置生效 */
+export function setApiBase(url: string) {
+  if (url) {
+    localStorage.setItem(LS_KEY, url.replace(/\/$/, ''))
+  } else {
+    localStorage.removeItem(LS_KEY)
+  }
+}
+
+export const api = axios.create({ baseURL: '/api' })
+
+// 每次请求前动态读取 baseURL，确保 localStorage 更改即时生效（无需刷新）
+api.interceptors.request.use((config) => {
+  const base = getApiBase()
+  config.baseURL = base ? `${base}/api` : '/api'
+  return config
+})
 
 // ── Types ─────────────────────────────────────────────────────────────────
 

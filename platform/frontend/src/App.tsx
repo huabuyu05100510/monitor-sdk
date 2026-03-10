@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { LayoutDashboard, AlertTriangle, Settings } from 'lucide-react'
+import { LayoutDashboard, AlertTriangle, Settings, Server } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import ErrorDetail from './pages/ErrorDetail'
 import ProjectSettings from './pages/ProjectSettings'
+import BackendConfig, { useBackendConfigNeeded } from './components/BackendConfig'
+import { getApiBase } from './lib/api'
 
 const navItems = [
   { to: '/', label: '总览', icon: LayoutDashboard, exact: true },
@@ -10,7 +13,10 @@ const navItems = [
   { to: '/settings/react-demo', label: '项目设置', icon: Settings },
 ]
 
-function Sidebar() {
+function Sidebar({ onOpenBackendConfig }: { onOpenBackendConfig: () => void }) {
+  const base = getApiBase()
+  const label = base ? new URL(base).host : 'localhost (proxy)'
+
   return (
     <aside className="w-56 min-h-screen bg-gray-900 text-gray-300 flex flex-col">
       <div className="px-5 py-5 border-b border-gray-700">
@@ -36,6 +42,15 @@ function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      {/* Backend URL config button */}
+      <button
+        onClick={onOpenBackendConfig}
+        className="mx-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 hover:text-gray-300 transition-colors text-left"
+        title="点击修改后端地址"
+      >
+        <Server size={13} className="flex-shrink-0" />
+        <span className="truncate">{label}</span>
+      </button>
       <div className="px-4 py-3 border-t border-gray-700 text-xs text-gray-500">
         v0.1.0 · SDK + RAG + LangGraph
       </div>
@@ -44,9 +59,14 @@ function Sidebar() {
 }
 
 export default function App() {
+  const [showConfig, setShowConfig] = useState(false)
+  const [autoNeeded, setAutoNeeded] = useBackendConfigNeeded()
+
+  const showModal = showConfig || autoNeeded
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
+      <Sidebar onOpenBackendConfig={() => setShowConfig(true)} />
       <main className="flex-1 overflow-auto">
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -55,6 +75,14 @@ export default function App() {
           <Route path="/settings/:appId" element={<ProjectSettings />} />
         </Routes>
       </main>
+      {showModal && (
+        <BackendConfig
+          onClose={() => {
+            setShowConfig(false)
+            setAutoNeeded(false)
+          }}
+        />
+      )}
     </div>
   )
 }
