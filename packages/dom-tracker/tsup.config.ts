@@ -24,5 +24,9 @@ export default defineConfig([
     external: ['react'],
     // axios 直接 bundle 进去，demo 无需单独引入
     noExternal: ['axios'],
+    // 浏览器没有 process，把 NODE_ENV 替换成 'development' 让 createDomTracker 正常运行
+    define: {
+      'process.env.NODE_ENV': '"development"',
+    },
   },
 ]);
