@@ -52,6 +52,26 @@ export class Project {
   @Column({ nullable: true })
   sourceRoot: string
 
+  // ── 仓库配置（用于 auto-apply 推分支/提 PR）─────────────────────────
+
+  /**
+   * GitHub 仓库地址，格式 https://github.com/owner/repo
+   * 用于 auto-apply 推送分支和创建 Pull Request。
+   * 留空时回退到全局 GITHUB_REPO 环境变量。
+   */
+  @ApiProperty({ required: false, description: 'GitHub 仓库地址，例 https://github.com/owner/repo' })
+  @Column({ nullable: true })
+  repoUrl: string
+
+  /**
+   * GitHub Personal Access Token（需要 repo 权限）。
+   * 用于 auto-apply 推送分支、创建 PR。
+   * 留空时回退到全局 GITHUB_TOKEN 环境变量。
+   */
+  @ApiProperty({ required: false, description: 'GitHub PAT（repo 权限），用于 auto-apply 推分支/提 PR' })
+  @Column({ nullable: true })
+  repoToken: string
+
   @CreateDateColumn()
   createdAt: Date
 

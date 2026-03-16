@@ -79,6 +79,23 @@ export function buildAnalysisGraph(
     }
   }
 
+  // ── Node: Reindex ─────────────────────────────────────────────────────────
+  // Runs after resolveNode so source-map resolution has already populated pendingRagReindex.
+  // If a new source map was detected, we await the full walkAndIndex before retrieval,
+  // ensuring the RAG store is fresh for the current analysis (not the next one).
+  async function reindexNode(state: AnalysisState): Promise<Partial<AnalysisState>> {
+    if (!state.sourceRoot) return {}
+    if (!sourcemapsService.needsRagReindex(state.appId)) return {}
+
+    sourcemapsService.clearRagReindex(state.appId)
+    try {
+      const result = await codeRagService.walkAndIndex(state.sourceRoot, state.appId, state.projectId)
+      return { warnings: [`RAG re-indexed: ${result.indexed} function slices from ${result.files} files`] }
+    } catch (err) {
+      return { warnings: [`RAG re-index failed (non-fatal): ${(err as Error).message}`] }
+    }
+  }
+
   // ── Node: Retrieve ────────────────────────────────────────────────────────
   async function retrieveNode(state: AnalysisState): Promise<Partial<AnalysisState>> {
     // Strategy 1 (preferred): direct file read when sourceRoot is configured.
@@ -160,11 +177,13 @@ export function buildAnalysisGraph(
   // ── Graph definition ──────────────────────────────────────────────────────
   const graph = new StateGraph(AnalysisAnnotation)
     .addNode('resolve', resolveNode)
+    .addNode('reindex', reindexNode)
     .addNode('retrieve', retrieveNode)
     .addNode('analyst', analystNode)
     .addNode('review', reviewNode)
     .addEdge('__start__', 'resolve')
-    .addEdge('resolve', 'retrieve')
+    .addEdge('resolve', 'reindex')
+    .addEdge('reindex', 'retrieve')
     .addEdge('retrieve', 'analyst')
     .addEdge('analyst', 'review')
     .addEdge('review', END)

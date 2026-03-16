@@ -43,6 +43,8 @@ export interface Project {
   sourcemapVersion?: string
   sourcemapDir?: string | null
   sourceRoot?: string | null
+  repoUrl?: string | null
+  repoToken?: string | null
 }
 
 export interface ErrorEvent {
@@ -90,6 +92,9 @@ export const projectsApi = {
   list: () => api.get<Project[]>('/projects').then((r) => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then((r) => r.data),
   create: (data: Partial<Project>) => api.post<Project>('/projects', data).then((r) => r.data),
+  update: (id: string, data: Partial<Project>) =>
+    api.patch<Project>(`/projects/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/projects/${id}`),
 }
 
 export const errorsApi = {
@@ -102,12 +107,20 @@ export const errorsApi = {
   trend: (appId: string) => api.get<TrendPoint[]>(`/errors/trend/${appId}`).then((r) => r.data),
 }
 
+export interface ApplyResult {
+  branch: string
+  prUrl: string | null
+  files: string[]
+  commitHash: string
+}
+
 export const analysisApi = {
   analyze: (errorEventId: string, version?: string) =>
     api
       .post<AnalysisResult>(`/analysis/analyze/${errorEventId}`, null, {
-        // Omit version param if empty so backend falls back to project.sourcemapVersion
         params: version ? { version } : {},
       })
       .then((r) => r.data),
+  apply: (errorEventId: string) =>
+    api.post<ApplyResult>(`/analysis/apply/${errorEventId}`).then((r) => r.data),
 }

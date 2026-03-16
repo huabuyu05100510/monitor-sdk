@@ -42,6 +42,27 @@ export class SourcemapsService {
   private readonly globalBaseDir: string
 
   /**
+   * Set of appIds that have a newly-seen source map (fetched from GitHub Raw
+   * or discovered for the first time on the local filesystem after a git pull).
+   * AnalysisService checks this before running analysis and auto-triggers RAG re-index.
+   */
+  private readonly pendingRagReindex = new Set<string>()
+
+  /**
+   * Source map file paths already seen in this process lifetime.
+   * Used to detect files that appeared since the last restart (e.g. via git pull).
+   */
+  private readonly seenLocalMaps = new Set<string>()
+
+  needsRagReindex(appId: string): boolean {
+    return this.pendingRagReindex.has(appId)
+  }
+
+  clearRagReindex(appId: string): void {
+    this.pendingRagReindex.delete(appId)
+  }
+
+  /**
    * Optional GitHub raw base URL for fetching CI-committed source maps.
    * Format: https://raw.githubusercontent.com/<owner>/<repo>/<branch>
    * When set, the service will fetch missing map files from GitHub and cache them locally.
@@ -164,6 +185,12 @@ export class SourcemapsService {
       if (foundPath) {
         this.logger.debug(`Filesystem fallback: using ${foundPath} (no DB record)`)
         record = { storagePath: foundPath } as any
+        // First time we see this file in this process (e.g. after a git pull) → re-index RAG
+        if (!this.seenLocalMaps.has(foundPath)) {
+          this.seenLocalMaps.add(foundPath)
+          this.pendingRagReindex.add(appId)
+          this.logger.log(`New local sourcemap detected for ${appId}, marked for RAG re-index`)
+        }
       } else if (this.githubRawBase) {
         // GitHub remote fallback: fetch the map file from the repo and cache it locally.
         // Path in repo: platform/backend/uploads/sourcemaps/<appId>/<version>/<file>.map
@@ -199,6 +226,9 @@ export class SourcemapsService {
           fs.writeFileSync(cachePath, fetchedContent, 'utf-8')
           this.logger.log(`GitHub fallback: cached ${bundleFilename}.map from ${fetchedPath}`)
           record = { storagePath: cachePath } as any
+          // New source map → mark this project for RAG re-index before next analysis
+          this.pendingRagReindex.add(appId)
+          this.logger.log(`Marked ${appId} for RAG re-index (new source map detected)`)
         } else {
           this.logger.warn(
             `No sourcemap for ${appId}@${version} :: ${bundleFilename}. ` +

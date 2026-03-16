@@ -4,6 +4,7 @@ import { ChatOpenAI } from '@langchain/openai'
 import { buildAnalysisGraph } from './analysis.graph'
 import { CodeRagService } from './code-rag.service'
 import { CodeReaderService } from './code-reader.service'
+import { AutoApplyService, type ApplyResult, type RepoCreds } from './auto-apply.service'
 import { SourcemapsService } from '../sourcemaps/sourcemaps.service'
 import { ErrorsService } from '../errors/errors.service'
 import { ProjectsService } from '../projects/projects.service'
@@ -18,6 +19,7 @@ export class AnalysisService {
     private readonly sourcemapsService: SourcemapsService,
     private readonly codeRagService: CodeRagService,
     private readonly codeReaderService: CodeReaderService,
+    private readonly autoApplyService: AutoApplyService,
     private readonly errorsService: ErrorsService,
     private readonly projectsService: ProjectsService,
   ) {
@@ -73,6 +75,8 @@ export class AnalysisService {
     )
 
     // Mark as analyzing
+    // Note: RAG re-index (if triggered) happens inside the graph, in the 'reindex' node,
+    // which runs after 'resolve' (source map resolution) and before 'retrieve' (RAG lookup).
     await this.errorsService.updateAnalysis(errorEventId, 'analyzing', null)
 
     const initialState = {
@@ -116,6 +120,76 @@ export class AnalysisService {
    */
   indexCode(doc: Parameters<CodeRagService['indexDocument']>[0]) {
     return this.codeRagService.indexDocument(doc)
+  }
+
+  /**
+   * Apply the AI-suggested fix: parse patches, write to disk, create branch + PR.
+   */
+  async applyFix(errorEventId: string): Promise<ApplyResult> {
+    if (!this.graph) {
+      throw new ServiceUnavailableException('AI analysis is disabled: OPENAI_API_KEY not configured')
+    }
+
+    const event = await this.errorsService.findOne(errorEventId)
+    if (!event) throw new NotFoundException(`ErrorEvent ${errorEventId} not found`)
+
+    const analysis = event.analysis as Record<string, any> | null
+    if (!analysis?.suggestedFix) {
+      throw new NotFoundException('No suggestedFix found — run AI analysis first')
+    }
+    if (!analysis?.resolvedStack) {
+      throw new NotFoundException('No resolvedStack found — run AI analysis first')
+    }
+
+    const project = await this.projectsService.findByAppId(event.appId)
+    if (!project?.sourceRoot) {
+      throw new ServiceUnavailableException('sourceRoot not configured for this project')
+    }
+
+    // Re-create the same LLM instance used for analysis
+    const baseURL = this.config.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+    const isOpenRouter = baseURL.includes('openrouter.ai')
+    const llm = new ChatOpenAI({
+      openAIApiKey: this.config.get('OPENAI_API_KEY', ''),
+      modelName: this.config.get('OPENAI_MODEL', 'gpt-4o'),
+      temperature: 0.1,
+      configuration: {
+        baseURL,
+        defaultHeaders: isOpenRouter
+          ? { 'HTTP-Referer': 'https://monitor-platform.local', 'X-Title': 'Monitor Platform' }
+          : {},
+      },
+    })
+
+    this.logger.log(`Extracting patches for event ${errorEventId}`)
+    const patches = await this.autoApplyService.extractPatches(
+      analysis.suggestedFix,
+      analysis.resolvedStack,
+      project.sourceRoot,
+      llm,
+    )
+
+    if (patches.length === 0) {
+      throw new ServiceUnavailableException('LLM could not extract any code patches from the fix suggestion')
+    }
+
+    // Build project-level repo creds (fall back handled inside AutoApplyService)
+    const projectCreds: Partial<RepoCreds> = {}
+    if (project.repoToken) projectCreds.token = project.repoToken
+    if (project.repoUrl) {
+      const ownerRepo = AutoApplyService.parseOwnerRepo(project.repoUrl)
+      if (ownerRepo) projectCreds.repo = ownerRepo
+    }
+
+    this.logger.log(`Applying ${patches.length} patches and submitting PR`)
+    return this.autoApplyService.applyAndSubmit(
+      errorEventId,
+      patches,
+      project.sourceRoot,
+      analysis.diagnosis ?? '',
+      projectCreds,
+      analysis.resolvedStack,
+    )
   }
 
   /**

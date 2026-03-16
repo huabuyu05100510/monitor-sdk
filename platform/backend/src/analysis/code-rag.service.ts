@@ -1,65 +1,196 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { OpenAIEmbeddings } from '@langchain/openai'
 import { ChromaClient, Collection } from 'chromadb'
 import * as fs from 'fs'
 import * as path from 'path'
 
+// ── Local embedding (zero external API) ────────────────────────────────────
+//
+// Approach: hash-based bag-of-words projection.
+//   1. Tokenize code into identifiers / keywords / operators
+//   2. For each token, deterministically hash it to a bucket in [0, DIM)
+//   3. Accumulate TF counts → normalize to unit vector
+//
+// Quality: equivalent to a unigram language model over code tokens.
+// For code retrieval (where function/variable names dominate), this
+// captures the right signals without any network calls or model files.
+
+const EMBED_DIM = 512
+
+/** djb2 hash → index in [0, EMBED_DIM) */
+function tokenHash(token: string): number {
+  let h = 5381
+  for (let i = 0; i < token.length; i++) {
+    h = ((h << 5) + h) ^ token.charCodeAt(i)
+    h = h >>> 0  // keep unsigned 32-bit
+  }
+  return h % EMBED_DIM
+}
+
+/** Extract meaningful tokens from source code */
+function tokenize(code: string): string[] {
+  // identifiers, keywords, string literals (first 16 chars), numbers
+  return Array.from(
+    code.matchAll(/[a-zA-Z_$][a-zA-Z0-9_$]*/g),
+    (m) => m[0],
+  ).filter((t) => t.length >= 2)  // skip single-char tokens
+}
+
+/** Produce a normalized float32 embedding vector for a code string */
+function embedCode(code: string): number[] {
+  const vec = new Float64Array(EMBED_DIM)
+  const tokens = tokenize(code)
+  if (tokens.length === 0) return Array.from({ length: EMBED_DIM }, () => 0)
+
+  // TF weighting: count occurrences
+  for (const t of tokens) {
+    vec[tokenHash(t)] += 1
+  }
+
+  // L2 normalize
+  let norm = 0
+  for (let i = 0; i < EMBED_DIM; i++) norm += vec[i] * vec[i]
+  norm = Math.sqrt(norm) || 1
+  return Array.from(vec, (v) => v / norm)
+}
+
+// ── AST-based function-level code slicer ───────────────────────────────────
+//
+// JS files  → esprima  (accurate, handles all function forms)
+// TS / TSX  → regex    (handles function decls, arrow fns, class methods)
+
+interface CodeSlice {
+  name: string
+  startLine: number
+  endLine: number
+  code: string
+}
+
+function sliceJS(source: string, filePath: string): CodeSlice[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const esprima = require('esprima')
+    const ast = esprima.parseScript(source, { loc: true, tolerant: true })
+    const slices: CodeSlice[] = []
+    const lines = source.split('\n')
+
+    function visit(node: any) {
+      if (!node || typeof node !== 'object') return
+      const isFn =
+        node.type === 'FunctionDeclaration' ||
+        node.type === 'FunctionExpression' ||
+        node.type === 'ArrowFunctionExpression' ||
+        node.type === 'MethodDefinition'
+
+      if (isFn && node.loc) {
+        const start = node.loc.start.line - 1
+        const end   = node.loc.end.line
+        const name  = node.id?.name ?? node.key?.name ?? `fn_${start + 1}`
+        slices.push({ name, startLine: start + 1, endLine: end, code: lines.slice(start, end).join('\n') })
+      }
+      for (const key of Object.keys(node)) {
+        const child = node[key]
+        if (Array.isArray(child)) child.forEach(visit)
+        else if (child && typeof child === 'object' && child.type) visit(child)
+      }
+    }
+    visit(ast)
+    return slices
+  } catch {
+    return sliceByRegex(source, filePath)
+  }
+}
+
+function sliceByRegex(source: string, _filePath: string): CodeSlice[] {
+  const slices: CodeSlice[] = []
+  const lines = source.split('\n')
+
+  // Pattern: exported/async function declarations, const arrow functions, class methods
+  const FN_START = /(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)\s*\(|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(|^\s{0,4}(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\S+\s*)?\{/
+
+  let i = 0
+  while (i < lines.length) {
+    const match = FN_START.exec(lines[i])
+    if (match) {
+      const name = match[1] ?? match[2] ?? match[3] ?? `fn_${i + 1}`
+      const startLine = i + 1
+
+      // Find the closing brace by tracking depth
+      let depth = 0
+      let end = i
+      for (let j = i; j < Math.min(i + 120, lines.length); j++) {
+        depth += (lines[j].match(/\{/g) ?? []).length
+        depth -= (lines[j].match(/\}/g) ?? []).length
+        if (depth <= 0 && j > i) { end = j + 1; break }
+        if (j === Math.min(i + 119, lines.length - 1)) end = j + 1
+      }
+
+      const code = lines.slice(i, end).join('\n').trim()
+      if (code.length > 20) slices.push({ name, startLine, endLine: end, code })
+      i = end
+    } else {
+      i++
+    }
+  }
+  return slices
+}
+
+function sliceFile(source: string, filePath: string): CodeSlice[] {
+  const ext = path.extname(filePath)
+  const slices = ext === '.js' || ext === '.jsx'
+    ? sliceJS(source, filePath)
+    : sliceByRegex(source, filePath)
+
+  // De-duplicate and remove tiny slices
+  const seen = new Set<string>()
+  return slices.filter((s) => {
+    const key = `${s.startLine}`
+    if (seen.has(key) || s.code.length < 30) return false
+    seen.add(key)
+    return true
+  })
+}
+
+// ── Service ────────────────────────────────────────────────────────────────
+
 /**
  * Manages the code vector store (ChromaDB) and provides:
- *  - indexDocument(): add a code snippet to the vector store
- *  - retrieve():      similarity search for related code snippets
+ *  - indexDocument():  add a function-level code slice to the store
+ *  - walkAndIndex():   scan a sourceRoot dir, slice all files, and index
+ *  - retrieve():       similarity search for relevant code
+ *
+ * Embedding is purely local (hash-based bag-of-words, EMBED_DIM=512).
+ * No external API calls required.
  */
 @Injectable()
 export class CodeRagService implements OnModuleInit {
   private readonly logger = new Logger(CodeRagService.name)
   private collection: Collection | null = null
-  private embeddings: OpenAIEmbeddings | null = null
   private chromaClient: ChromaClient
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = config.get('OPENAI_API_KEY', '')
-    if (apiKey) {
-      const baseURL = config.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-      const isOpenRouter = baseURL.includes('openrouter.ai')
-      this.embeddings = new OpenAIEmbeddings({
-        openAIApiKey: apiKey,
-        modelName: isOpenRouter ? 'openai/text-embedding-3-small' : undefined,
-        configuration: {
-          baseURL,
-          defaultHeaders: isOpenRouter
-            ? { 'HTTP-Referer': 'https://monitor-platform.local', 'X-Title': 'Monitor Platform' }
-            : {},
-        },
-      })
-    }
-
     this.chromaClient = new ChromaClient({
       path: config.get('CHROMA_URL', 'http://localhost:8000'),
     })
   }
 
   async onModuleInit() {
-    if (!this.embeddings) {
-      this.logger.warn('OPENAI_API_KEY not set — code RAG is disabled')
-      return
-    }
     try {
       this.collection = await this.chromaClient.getOrCreateCollection({
         name: 'monitor_code_index',
         metadata: { 'hnsw:space': 'cosine' },
       })
-      this.logger.log('ChromaDB collection ready')
+      this.logger.log('ChromaDB collection ready (local embedding, no API needed)')
     } catch {
       this.logger.warn(
         'ChromaDB not available — code RAG will return empty results. ' +
-          'Start ChromaDB to enable: docker run -p 8000:8000 chromadb/chroma',
+        'Start ChromaDB: chroma run --host 0.0.0.0 --port 8000',
       )
     }
   }
 
   /**
-   * Index a code snippet (function / component) into the vector store.
+   * Index a single code slice into the vector store.
    */
   async indexDocument(doc: {
     appId: string
@@ -70,50 +201,46 @@ export class CodeRagService implements OnModuleInit {
     endLine: number
     code: string
   }): Promise<void> {
-    if (!this.collection || !this.embeddings) return
+    if (!this.collection) return
 
     const id = `${doc.appId}__${doc.filePath}__${doc.functionName}__${doc.startLine}`
-    const embedding = await this.embeddings.embedQuery(doc.code)
+    const embedding = embedCode(doc.code)
 
     await this.collection.upsert({
       ids: [id],
       embeddings: [embedding],
       documents: [doc.code],
-      metadatas: [
-        {
-          appId: doc.appId,
-          projectId: doc.projectId,
-          filePath: doc.filePath,
-          functionName: doc.functionName,
-          startLine: doc.startLine,
-          endLine: doc.endLine,
-        },
-      ],
+      metadatas: [{
+        appId: doc.appId,
+        projectId: doc.projectId,
+        filePath: doc.filePath,
+        functionName: doc.functionName,
+        startLine: doc.startLine,
+        endLine: doc.endLine,
+      }],
     })
   }
 
   /**
-   * Walk a source directory and index all .ts/.tsx/.js/.jsx files into the vector store.
-   * Each file is split into chunks of up to `chunkLines` lines to keep embeddings focused.
-   * Returns the number of chunks indexed.
+   * Walk sourceRoot, slice every .ts/.tsx/.js/.jsx file at the function level,
+   * and index each slice into ChromaDB.
    */
   async walkAndIndex(
     sourceRoot: string,
     appId: string,
     projectId: string,
-    chunkLines = 60,
   ): Promise<{ indexed: number; skipped: number; files: number }> {
-    if (!this.collection || !this.embeddings) {
-      this.logger.warn('walkAndIndex called but ChromaDB / embeddings not available')
+    if (!this.collection) {
+      this.logger.warn('walkAndIndex: ChromaDB not available')
       return { indexed: 0, skipped: 0, files: 0 }
     }
 
     const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.cache', 'coverage', 'build', '__tests__'])
     const SOURCE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx'])
 
+    // Collect all source files
     const allFiles: string[] = []
     const queue: string[] = [path.resolve(sourceRoot)]
-
     while (queue.length > 0) {
       const dir = queue.shift()!
       let entries: fs.Dirent[]
@@ -130,54 +257,46 @@ export class CodeRagService implements OnModuleInit {
     let indexed = 0
     let skipped = 0
 
-    for (const filePath of allFiles) {
-      let content: string
-      try { content = fs.readFileSync(filePath, 'utf-8') } catch { skipped++; continue }
+    for (const absPath of allFiles) {
+      let source: string
+      try { source = fs.readFileSync(absPath, 'utf-8') } catch { skipped++; continue }
 
-      const lines = content.split('\n')
-      const relPath = '/' + path.relative(path.resolve(sourceRoot), filePath).replace(/\\/g, '/')
+      const relPath = '/' + path.relative(path.resolve(sourceRoot), absPath).replace(/\\/g, '/')
+      const slices = sliceFile(source, absPath)
 
-      // Split file into overlapping chunks
-      for (let start = 0; start < lines.length; start += chunkLines - 10) {
-        const end = Math.min(lines.length, start + chunkLines)
-        const chunkCode = lines.slice(start, end).join('\n').trim()
-        if (chunkCode.length < 30) continue  // skip tiny chunks
-
-        // Extract a representative function name from the chunk (first function/const/class)
-        const fnMatch = /(?:function\s+(\w+)|(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+)?(?:const|let|var)\s+(\w+)\s*[=:]\s*(?:async\s+)?\(|class\s+(\w+))/.exec(chunkCode)
-        const functionName = fnMatch?.[1] ?? fnMatch?.[2] ?? fnMatch?.[3] ?? `chunk_${start}`
-
+      for (const slice of slices) {
         try {
           await this.indexDocument({
-            appId,
-            projectId,
+            appId, projectId,
             filePath: relPath,
-            functionName,
-            startLine: start + 1,
-            endLine: end,
-            code: chunkCode,
+            functionName: slice.name,
+            startLine: slice.startLine,
+            endLine: slice.endLine,
+            code: slice.code,
           })
           indexed++
-        } catch (err) {
-          this.logger.warn(`Failed to index ${relPath}:${start}`, err)
+        } catch {
           skipped++
         }
       }
+      if (slices.length === 0) skipped++
     }
 
-    this.logger.log(`walkAndIndex done: ${allFiles.length} files, ${indexed} chunks indexed, ${skipped} skipped`)
+    this.logger.log(
+      `walkAndIndex: ${allFiles.length} files, ${indexed} function slices indexed, ${skipped} skipped`,
+    )
     return { indexed, skipped, files: allFiles.length }
   }
 
   /**
-   * Retrieve the top-k most relevant code snippets.
-   * Always filter by appId for multi-tenant isolation.
+   * Retrieve top-k most similar function slices for a query string.
+   * Filtered by appId for multi-project isolation.
    */
   async retrieve(query: string, appId: string, k = 5): Promise<string[]> {
-    if (!this.collection || !this.embeddings) return []
+    if (!this.collection) return []
 
     try {
-      const queryEmbedding = await this.embeddings.embedQuery(query)
+      const queryEmbedding = embedCode(query)
 
       const results = await this.collection.query({
         queryEmbeddings: [queryEmbedding],
@@ -186,8 +305,8 @@ export class CodeRagService implements OnModuleInit {
         include: ['documents', 'metadatas'] as any,
       })
 
-      const docs = results.documents?.[0] ?? []
-      const metas = results.metadatas?.[0] ?? []
+      const docs  = results.documents?.[0] ?? []
+      const metas = results.metadatas?.[0]  ?? []
 
       return docs.map((doc, i) => {
         const meta = metas[i] as any

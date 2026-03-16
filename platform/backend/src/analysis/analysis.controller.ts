@@ -21,6 +21,16 @@ export class AnalysisController {
   }
 
   /**
+   * Apply the AI-suggested fix to source code, create a git branch, and open a PR.
+   * Requires: analysis already run, sourceRoot configured, GITHUB_TOKEN + GITHUB_REPO in .env.
+   */
+  @Post('apply/:errorEventId')
+  @ApiOperation({ summary: '将 AI 修复建议应用到源码，自动建分支并向 master 提 PR' })
+  apply(@Param('errorEventId') errorEventId: string) {
+    return this.svc.applyFix(errorEventId)
+  }
+
+  /**
    * Walk the project's sourceRoot and batch-index all source files into ChromaDB.
    * The sourceRoot must be configured on the project settings first.
    */

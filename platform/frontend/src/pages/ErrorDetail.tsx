@@ -6,9 +6,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import {
   ArrowLeft, Brain, Zap, FileCode, CheckCircle2,
-  AlertTriangle, Loader2, ChevronDown, ChevronRight, Settings,
+  AlertTriangle, Loader2, ChevronDown, ChevronRight, Settings, GitPullRequest, GitBranch,
 } from 'lucide-react'
-import { errorsApi, analysisApi, type ErrorEvent, type AnalysisResult } from '../lib/api'
+import { errorsApi, analysisApi, type ErrorEvent, type AnalysisResult, type ApplyResult } from '../lib/api'
 import { SubTypeBadge } from '../components/SubTypeBadge'
 import { StatusBadge } from '../components/StatusBadge'
 
@@ -62,7 +62,10 @@ export default function ErrorDetail() {
   const [event, setEvent] = useState<ErrorEvent | null>(null)
   const [loading, setLoading] = useState(true)
   const [analyzing, setAnalyzing] = useState(false)
-  const [version, setVersion] = useState('')  // empty = use project.sourcemapVersion
+  const [applying, setApplying] = useState(false)
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const [version, setVersion] = useState('')
 
   const fetchEvent = async () => {
     if (!id) return
@@ -82,6 +85,21 @@ export default function ErrorDetail() {
       await fetchEvent()
     } finally {
       setAnalyzing(false)
+    }
+  }
+
+  const handleApply = async () => {
+    if (!id) return
+    setApplying(true)
+    setApplyResult(null)
+    setApplyError(null)
+    try {
+      const result = await analysisApi.apply(id)
+      setApplyResult(result)
+    } catch (e: any) {
+      setApplyError(e?.response?.data?.message ?? '应用失败，请查看后端日志')
+    } finally {
+      setApplying(false)
     }
   }
 
@@ -173,7 +191,7 @@ export default function ErrorDetail() {
           </Section>
 
           {/* User context */}
-          <Section title="用户上下文" icon={<FileCode size={14} className="text-gray-400" />} defaultOpen={false}>
+          <Section title="用户上下文" icon={<FileCode size={14} className="text-gray-400" />}>
             <div className="p-4 space-y-2 text-xs text-gray-600">
               <InfoRow label="URL" value={event.url} />
               <InfoRow label="UA" value={event.userAgent} />
@@ -238,7 +256,7 @@ export default function ErrorDetail() {
 
           {/* Related code from RAG */}
           {analysis?.relatedCode && analysis.relatedCode.length > 0 && (
-            <Section title={`RAG 相关源码（${analysis.relatedCode.length} 片段）`} icon={<FileCode size={14} className="text-green-500" />} defaultOpen={false}>
+            <Section title={`RAG 相关源码（${analysis.relatedCode.length} 片段）`} icon={<FileCode size={14} className="text-green-500" />}>
               <div className="p-4 space-y-3">
                 {analysis.relatedCode.map((snippet, i) => (
                   <div key={i}>
@@ -258,23 +276,80 @@ export default function ErrorDetail() {
                 分析完成后将展示修复方案
               </div>
             ) : (
-              <div className="p-5">
-                <div className="prose prose-sm max-w-none">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      code({ className, children }) {
-                        const lang = className?.replace('language-', '')
-                        return (
-                          <CodeBlock language={lang}>
-                            {String(children).replace(/\n$/, '')}
-                          </CodeBlock>
-                        )
-                      },
-                    }}
-                  >
-                    {analysis.suggestedFix}
-                  </ReactMarkdown>
+              <div>
+                <div className="p-5">
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code({ className, children }) {
+                          const lang = className?.replace('language-', '')
+                          return (
+                            <CodeBlock language={lang}>
+                              {String(children).replace(/\n$/, '')}
+                            </CodeBlock>
+                          )
+                        },
+                      }}
+                    >
+                      {analysis.suggestedFix}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+
+                {/* Apply Fix */}
+                <div className="px-5 pb-5 border-t border-gray-100 pt-4">
+                  {!applyResult ? (
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleApply}
+                        disabled={applying}
+                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                      >
+                        {applying
+                          ? <><Loader2 size={14} className="animate-spin" />应用中…</>
+                          : <><GitPullRequest size={14} />应用修复并提 PR</>
+                        }
+                      </button>
+                      <span className="text-xs text-gray-400">
+                        自动写入源码 → 建分支 → commit → 向 master 提 PR
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 space-y-2">
+                      <div className="flex items-center gap-2 text-emerald-700 font-semibold text-sm">
+                        <CheckCircle2 size={16} />
+                        修复已提交
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        <GitBranch size={12} className="text-gray-400" />
+                        分支：<code className="bg-white border border-gray-200 px-1.5 py-0.5 rounded">{applyResult.branch}</code>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        修改文件：{applyResult.files.join(', ')}
+                      </div>
+                      {applyResult.prUrl ? (
+                        <a
+                          href={applyResult.prUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          <GitPullRequest size={12} />
+                          查看 Pull Request
+                        </a>
+                      ) : (
+                        <p className="text-xs text-amber-600">
+                          分支已推送，PR 创建失败或已存在（可前往 GitHub 手动提 PR）
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {applyError && (
+                    <div className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      {applyError}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -282,7 +357,7 @@ export default function ErrorDetail() {
 
           {/* Review note */}
           {analysis?.reviewNote && (
-            <Section title="代码审查意见" icon={<CheckCircle2 size={14} className="text-teal-500" />} defaultOpen={false}>
+            <Section title="代码审查意见" icon={<CheckCircle2 size={14} className="text-teal-500" />}>
               <div className="p-4 text-sm text-gray-700 leading-relaxed bg-teal-50 rounded-b-xl">
                 {analysis.reviewNote}
               </div>
@@ -291,7 +366,7 @@ export default function ErrorDetail() {
 
           {/* Warnings */}
           {analysis?.warnings && analysis.warnings.length > 0 && (
-            <Section title="分析警告" icon={<AlertTriangle size={14} className="text-yellow-500" />} defaultOpen={false}>
+            <Section title="分析警告" icon={<AlertTriangle size={14} className="text-yellow-500" />}>
               <div className="p-4 space-y-1">
                 {analysis.warnings.map((w, i) => (
                   <p key={i} className="text-xs text-yellow-700 bg-yellow-50 rounded px-2 py-1">{w}</p>
