@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, forwardRef, cloneElement } from 'react';
+import React, { useEffect, useRef, forwardRef, cloneElement, ForwardRefExoticComponent, PropsWithoutRef, RefAttributes, ElementType } from 'react';
 import { setDomMetadata } from './metadataStore';
 import type { DomMetadata } from './types';
 
@@ -8,19 +8,17 @@ interface WithDataTrackerOptions {
   wrapperTag?: string;
 }
 
-export function withDataTracker<
-  T extends React.ForwardRefExoticComponent<React.PropsWithoutRef<any> & React.RefAttributes<any>>
->(
+export function withDataTracker<T extends ElementType>(
   Component: T,
   options: WithDataTrackerOptions = {}
-): React.ForwardRefExoticComponent<React.PropsWithoutRef<React.ComponentProps<T>> & React.RefAttributes<unknown>> {
+): ForwardRefExoticComponent<PropsWithoutRef<React.ComponentProps<T>> & RefAttributes<any>> {
   const { componentName: optionComponentName, filePath, wrapperTag = 'div' } = options;
 
   // Determine the component name from options or the Component itself
   const componentName = optionComponentName || (Component as any).displayName || (Component as any).name || 'UnknownComponent';
   const effectiveFilePath = filePath || 'unknown';
 
-  const Wrapper = forwardRef((props: React.ComponentProps<T>, ref: React.Ref<unknown>) => {
+  const Wrapper = forwardRef((props: any, ref: any) => {
     const wrapperRef = useRef<HTMLElement>(null);
     const wrapperId = useRef<string>('wrapper-' + Math.random().toString(36).substr(2, 9));
 
@@ -49,7 +47,7 @@ export function withDataTracker<
         'data-data-tracker-wrapper': wrapperId.current,
       },
       cloneElement(componentElement, {
-        ref: ref as React.Ref<unknown>,
+        ref,
       })
     );
   });
@@ -57,7 +55,7 @@ export function withDataTracker<
   const displayName = componentName;
   Wrapper.displayName = `WithDataTracker(${displayName})`;
 
-  return Wrapper;
+  return Wrapper as ForwardRefExoticComponent<PropsWithoutRef<React.ComponentProps<T>> & RefAttributes<any>>;
 }
 
 // Also export a simpler hook-based approach for functional components

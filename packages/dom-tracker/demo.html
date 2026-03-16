@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>@monit/dom-tracker — 演示</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e5e7eb;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: #16181e;
+      border-bottom: 1px solid #2d2f36;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header h1 { margin: 0; font-size: 18px; color: #f9fafb; }
+    .badge {
+      background: #10b981;
+      color: #fff;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+    .hint {
+      margin-left: auto;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .layout {
+      display: flex;
+      gap: 0;
+      min-height: calc(100vh - 57px);
+    }
+
+    .sidebar {
+      width: 260px;
+      background: #16181e;
+      border-right: 1px solid #2d2f36;
+      padding: 20px;
+      flex-shrink: 0;
+    }
+    .sidebar h3 {
+      margin: 0 0 12px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #6b7280;
+    }
+
+    .ctrl-group { margin-bottom: 20px; }
+    .ctrl-group label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #d1d5db;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .ctrl-group input[type="range"] { width: 100%; accent-color: #10b981; }
+    .ctrl-group input[type="checkbox"] { accent-color: #10b981; width: 15px; height: 15px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #10b981; color: #fff; width: 100%; justify-content: center; margin-bottom: 8px; }
+    .btn-ghost { background: #1f2129; color: #d1d5db; width: 100%; justify-content: center; margin-bottom: 8px; }
+    .btn-danger { background: #ef4444; color: #fff; width: 100%; justify-content: center; }
+
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      flex-shrink: 0;
+    }
+    .status-dot.on { background: #10b981; animation: pulse 2s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .log-panel {
+      margin-top: 16px;
+      background: #0f1117;
+      border: 1px solid #2d2f36;
+      border-radius: 6px;
+      padding: 10px;
+      max-height: 240px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: 'Menlo', 'Monaco', monospace;
+      line-height: 1.6;
+    }
+    .log-entry { color: #6b7280; }
+    .log-entry.info { color: #60a5fa; }
+    .log-entry.success { color: #10b981; }
+    .log-entry.warn { color: #fbbf24; }
+    .log-entry.error { color: #f87171; }
+
+    .main {
+      flex: 1;
+      padding: 32px;
+      overflow-y: auto;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 0 0 16px;
+    }
+
+    /* ===== Demo Cards ===== */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .card {
+      background: #16181e;
+      border: 1px solid #2d2f36;
+      border-radius: 10px;
+      padding: 18px;
+      transition: border-color 0.2s;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    .card:hover { border-color: #4b5563; }
+    .card.tracked { border-color: #10b981 !important; }
+    .card.tracked::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: #10b981;
+    }
+
+    .card-icon { font-size: 28px; margin-bottom: 10px; }
+    .card-title { font-size: 14px; font-weight: 600; color: #f9fafb; margin-bottom: 4px; }
+    .card-desc { font-size: 12px; color: #6b7280; margin-bottom: 12px; line-height: 1.5; }
+    .card-meta { font-size: 11px; color: #374151; }
+    .card-meta span { color: #4b5563; font-family: monospace; }
+
+    /* ===== Table ===== */
+    .table-wrap {
+      background: #16181e;
+      border: 1px solid #2d2f36;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+    .table-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid #2d2f36;
+    }
+    .table-header h4 { margin: 0; font-size: 14px; color: #f9fafb; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      padding: 10px 18px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      border-bottom: 1px solid #2d2f36;
+      background: #0f1117;
+    }
+    td {
+      padding: 12px 18px;
+      font-size: 13px;
+      color: #d1d5db;
+      border-bottom: 1px solid #1f2129;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1a1c24; }
+    tr.tracked-row td:first-child { border-left: 3px solid #10b981; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .tag-get { background: #1d4ed820; color: #60a5fa; }
+    .tag-post { background: #16a34a20; color: #4ade80; }
+    .tag-delete { background: #dc262620; color: #f87171; }
+
+    /* ===== Inline Demo ===== */
+    .form-section {
+      background: #16181e;
+      border: 1px solid #2d2f36;
+      border-radius: 10px;
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+    .form-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .form-row input, .form-row select {
+      flex: 1;
+      min-width: 140px;
+      background: #0f1117;
+      border: 1px solid #2d2f36;
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #e5e7eb;
+      font-size: 13px;
+    }
+    .form-row input:focus, .form-row select:focus {
+      outline: none;
+      border-color: #10b981;
+    }
+
+    /* ===== Overlay ===== */
+    #monit-dom-tracker-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 99999;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="status-dot" id="statusDot"></div>
+  <h1>@monit/dom-tracker</h1>
+  <span class="badge">DEV</span>
+  <span class="hint">悬停到绿色边框元素查看数据来源</span>
+</div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <h3>控制面板</h3>
+
+    <div class="ctrl-group">
+      <button class="btn btn-primary" id="btnInit" onclick="initTracker()">
+        ▶ 启动 DomTracker
+      </button>
+      <button class="btn btn-ghost" id="btnMock" onclick="runMockRequests()">
+        ⚡ 模拟 API 请求
+      </button>
+      <button class="btn btn-danger" id="btnDestroy" onclick="destroyTracker()">
+        ✕ 销毁
+      </button>
+    </div>
+
+    <div class="ctrl-group">
+      <label>
+        <input type="checkbox" id="chkStack" checked />
+        显示 Component Stack
+      </label>
+      <label>
+        <input type="checkbox" id="chkAutoMock" />
+        启动后自动 Mock
+      </label>
+    </div>
+
+    <h3 style="margin-top:20px">事件日志</h3>
+    <div class="log-panel" id="logPanel"></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Cards -->
+    <p class="section-title">商品列表（卡片）</p>
+    <div class="cards" id="cardContainer">
+      <!-- JS 生成 -->
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <div class="table-header">
+        <h4>订单列表</h4>
+        <button class="btn btn-ghost" style="width:auto" onclick="loadOrders()">刷新</button>
+      </div>
+      <table id="orderTable">
+        <thead>
+          <tr>
+            <th>订单号</th>
+            <th>商品</th>
+            <th>状态</th>
+            <th>金额</th>
+            <th>接口</th>
+          </tr>
+        </thead>
+        <tbody id="orderBody">
+          <tr><td colspan="5" style="text-align:center;color:#4b5563">点击「刷新」加载订单</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Form -->
+    <div class="form-section" id="formSection">
+      <p class="section-title" style="margin-top:0">搜索 / 筛选</p>
+      <div class="form-row">
+        <input type="text" id="searchInput" placeholder="搜索商品名称…" oninput="handleSearch(this)" />
+        <select id="categorySelect" onchange="handleCategoryChange(this)">
+          <option value="">全部分类</option>
+          <option value="electronics">电子产品</option>
+          <option value="clothing">服装</option>
+          <option value="food">食品</option>
+        </select>
+        <button class="btn btn-primary" style="width:auto" onclick="handleSubmit()">搜索</button>
+      </div>
+      <div id="searchResult" style="font-size:13px;color:#6b7280;margin-top:8px"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== Inline tracker implementation (no build needed) ===== -->
+<script>
+// ─── MetadataStore ───────────────────────────────────────────────
+const metadataMap = new WeakMap();
+
+function setDomMetadata(element, metadata) {
+  metadataMap.set(element, metadata);
+}
+function getDomMetadata(element) {
+  return metadataMap.get(element);
+}
+
+// ─── Overlay ────────────────────────────────────────────────────
+let overlay = null;
+
+function createOverlay() {
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'monit-dom-tracker-overlay';
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 99999; display: none;
+  `;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function showOverlay(target, metadata) {
+  if (!overlay) createOverlay();
+  const rect = target.getBoundingClientRect();
+
+  // Make sure tooltip stays inside viewport
+  let top = rect.bottom + window.scrollY + 8;
+  let left = rect.left + window.scrollX;
+  if (left + 340 > window.innerWidth) left = window.innerWidth - 350;
+
+  let html = '';
+
+  if (metadata.apiSource) {
+    const { url, method, params, timestamp } = metadata.apiSource;
+    const time = new Date(timestamp).toLocaleTimeString();
+    html += `
+      <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.1)">
+        <div style="color:#10b981;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+          🌐 API 数据来源
+          <span style="font-size:10px;color:#6b7280;font-weight:400">${time}</span>
+        </div>
+        <div style="color:#60a5fa;margin-bottom:4px">
+          <span style="background:#1d4ed820;color:#93c5fd;padding:1px 6px;border-radius:3px;font-size:11px;margin-right:6px">${method.toUpperCase()}</span>
+          ${escapeHtml(url)}
+        </div>
+        ${params ? `<div style="color:#9ca3af;font-size:11px">Params: ${escapeHtml(JSON.stringify(params))}</div>` : ''}
+      </div>`;
+  }
+
+  html += `
+    <div style="margin-bottom:10px">
+      <div style="color:#10b981;font-weight:600;margin-bottom:4px">📦 JS 资源来源</div>
+      <div style="color:#fbbf24;margin-bottom:2px">${escapeHtml(metadata.jsSource.component)}</div>
+      <div style="color:#9ca3af;font-size:11px">${escapeHtml(metadata.jsSource.file)}:${metadata.jsSource.line}</div>
+    </div>`;
+
+  if (metadata.componentStack && metadata.componentStack.length > 0) {
+    html += `
+      <div>
+        <div style="color:#10b981;font-weight:600;margin-bottom:6px">🧩 调用链</div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          ${metadata.componentStack.map((s, i) => `
+            <div style="color:${i===0?'#e5e7eb':'#6b7280'};font-size:11px;display:flex;align-items:center;gap:4px">
+              <span style="color:#374151;min-width:14px;text-align:right">${i}</span>
+              <span>${escapeHtml(s)}</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  overlay.innerHTML = `
+    <div style="
+      position: absolute;
+      top: ${top}px;
+      left: ${left}px;
+      min-width: 320px;
+      max-width: 480px;
+      background: rgba(15,17,23,0.97);
+      color: #fff;
+      padding: 16px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-family: 'Menlo','Monaco','Courier New',monospace;
+      box-shadow: 0 8px 32px rgba(0,0,0,.6);
+      pointer-events: auto;
+      border: 1px solid rgba(16,185,129,.3);
+      backdrop-filter: blur(12px);
+    ">${html}</div>`;
+  overlay.style.display = 'block';
+}
+
+function hideOverlay() {
+  if (overlay) overlay.style.display = 'none';
+}
+function removeOverlay() {
+  if (overlay) { overlay.remove(); overlay = null; }
+}
+
+// ─── Mock Axios-like fetch wrapper ──────────────────────────────
+const pendingRequests = new Map();
+let reqIdCounter = 0;
+
+// Intercept: register element before fetch
+function trackedFetch(url, options = {}, sourceElement, componentName) {
+  const id = reqIdCounter++;
+  const method = (options.method || 'GET').toLowerCase();
+  const params = options.params || null;
+
+  return new Promise((resolve) => {
+    // Simulate network delay (100-600ms)
+    const delay = 100 + Math.random() * 500;
+    setTimeout(() => {
+      const data = generateMockResponse(url, method);
+      const metadata = {
+        apiSource: { url, method, params, timestamp: Date.now() },
+        jsSource: {
+          component: componentName || 'UnknownComponent',
+          file: `src/${componentName || 'component'}.tsx`,
+          line: Math.floor(Math.random() * 80) + 10,
+          column: 4,
+        },
+        componentStack: buildMockStack(componentName),
+      };
+
+      if (sourceElement) {
+        setDomMetadata(sourceElement, metadata);
+        sourceElement.classList.add('tracked');
+        if (sourceElement.tagName === 'TR') {
+          sourceElement.classList.add('tracked-row');
+        }
+        log('success', `✓ ${method.toUpperCase()} ${url} → <${sourceElement.tagName.toLowerCase()}>`);
+      }
+      resolve(data);
+    }, delay);
+  });
+}
+
+function buildMockStack(componentName) {
+  const stacks = {
+    ProductCard: ['ProductCard.onClick', 'EventBus.emit', 'ProductList.render', 'App.render'],
+    OrderList: ['OrderList.fetchOrders', 'DataProvider.load', 'OrderPage.componentDidMount'],
+    SearchBar: ['SearchBar.handleSubmit', 'Form.onSubmit', 'SearchPage.render'],
+    CategoryFilter: ['CategoryFilter.onChange', 'FilterPanel.update', 'ProductPage.render'],
+  };
+  return stacks[componentName] || ['Component.handler', 'EventBus.dispatch', 'App.render'];
+}
+
+function generateMockResponse(url, method) {
+  if (url.includes('/products')) return { items: [], total: 42 };
+  if (url.includes('/orders')) return { orders: [], page: 1 };
+  if (url.includes('/search')) return { results: [], query: '' };
+  return { ok: true };
+}
+
+// ─── DomTracker core ────────────────────────────────────────────
+let trackerActive = false;
+let teardown = null;
+
+function initTracker() {
+  if (trackerActive) { log('warn', 'DomTracker 已经启动'); return; }
+
+  trackerActive = true;
+  createOverlay();
+
+  const handleMouseOver = (e) => {
+    const target = e.target;
+    if (target.closest('#monit-dom-tracker-overlay')) return;
+    const metadata = getDomMetadata(target) || getDomMetadata(target.closest('[data-tracked]') || target);
+    if (metadata) showOverlay(target, metadata);
+    else hideOverlay();
+  };
+
+  const handleMouseLeave = () => hideOverlay();
+
+  document.addEventListener('mouseover', handleMouseOver);
+  document.addEventListener('mouseleave', handleMouseLeave);
+
+  teardown = () => {
+    document.removeEventListener('mouseover', handleMouseOver);
+    document.removeEventListener('mouseleave', handleMouseLeave);
+    removeOverlay();
+    trackerActive = false;
+    document.querySelectorAll('.tracked, .tracked-row').forEach(el => {
+      el.classList.remove('tracked', 'tracked-row');
+    });
+  };
+
+  document.getElementById('statusDot').classList.add('on');
+  log('info', '@monit/dom-tracker 已启动');
+
+  if (document.getElementById('chkAutoMock').checked) {
+    setTimeout(runMockRequests, 300);
+  }
+}
+
+function destroyTracker() {
+  if (!trackerActive) { log('warn', 'DomTracker 未启动'); return; }
+  if (teardown) teardown();
+  document.getElementById('statusDot').classList.remove('on');
+  log('warn', '@monit/dom-tracker 已销毁');
+}
+
+// ─── Demo Data & Mock Requests ──────────────────────────────────
+const products = [
+  { id: 1, icon: '📱', name: 'iPhone 16 Pro', desc: '最新款旗舰智能手机', api: '/api/products/1', component: 'ProductCard', price: '¥9,999' },
+  { id: 2, icon: '💻', name: 'MacBook Air M3', desc: '超薄高性能笔记本', api: '/api/products/2', component: 'ProductCard', price: '¥9,499' },
+  { id: 3, icon: '🎧', name: 'AirPods Pro', desc: '主动降噪无线耳机', api: '/api/products/3', component: 'ProductCard', price: '¥1,899' },
+  { id: 4, icon: '⌚', name: 'Apple Watch Ultra', desc: '高端运动智能手表', api: '/api/products/4', component: 'ProductCard', price: '¥6,299' },
+  { id: 5, icon: '📷', name: 'Sony A7 IV', desc: '全画幅微单相机', api: '/api/products/5', component: 'ProductCard', price: '¥17,999' },
+  { id: 6, icon: '🖥️', name: 'LG 4K 显示器', desc: '27寸专业级显示器', api: '/api/products/6', component: 'ProductCard', price: '¥3,499' },
+];
+
+const orders = [
+  { id: 'ORD-2024-001', product: 'iPhone 16 Pro', status: '已完成', amount: '¥9,999', api: '/api/orders/1', method: 'get' },
+  { id: 'ORD-2024-002', product: 'MacBook Air M3', status: '配送中', amount: '¥9,499', api: '/api/orders/2', method: 'get' },
+  { id: 'ORD-2024-003', product: 'AirPods Pro', status: '待支付', amount: '¥1,899', api: '/api/orders/3', method: 'post' },
+  { id: 'ORD-2024-004', product: 'Sony A7 IV', status: '已取消', amount: '¥17,999', api: '/api/orders/4', method: 'delete' },
+];
+
+// ── Render Cards
+function renderCards() {
+  const container = document.getElementById('cardContainer');
+  container.innerHTML = products.map(p => `
+    <div class="card" id="card-${p.id}" onclick="cardClick(${p.id})">
+      <div class="card-icon">${p.icon}</div>
+      <div class="card-title">${p.name}</div>
+      <div class="card-desc">${p.desc}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:15px;font-weight:700;color:#10b981">${p.price}</span>
+        <span style="font-size:11px;color:#374151;font-family:monospace">${p.api}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Render Orders
+function renderOrders(data) {
+  const tbody = document.getElementById('orderBody');
+  const methodColor = { get: 'tag-get', post: 'tag-post', delete: 'tag-delete' };
+  const statusColor = { '已完成': '#10b981', '配送中': '#fbbf24', '待支付': '#60a5fa', '已取消': '#6b7280' };
+
+  tbody.innerHTML = data.map((o, i) => `
+    <tr id="order-row-${i}">
+      <td style="font-family:monospace;color:#9ca3af">${o.id}</td>
+      <td>${o.product}</td>
+      <td><span style="color:${statusColor[o.status] || '#fff'}">${o.status}</span></td>
+      <td style="font-weight:600">${o.amount}</td>
+      <td>
+        <span class="tag ${methodColor[o.method]}">${o.method.toUpperCase()}</span>
+        <span style="font-size:11px;color:#4b5563;margin-left:6px;font-family:monospace">${o.api}</span>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// ── Mock all requests
+async function runMockRequests() {
+  if (!trackerActive) {
+    log('warn', '请先启动 DomTracker');
+    return;
+  }
+  log('info', '开始模拟 API 请求...');
+
+  // Cards
+  products.forEach(p => {
+    const el = document.getElementById(`card-${p.id}`);
+    if (el) {
+      trackedFetch(p.api, { method: 'GET', params: { id: p.id } }, el, p.component);
+    }
+  });
+
+  // Order rows (need to render first)
+  renderOrders(orders);
+  await new Promise(r => setTimeout(r, 50));
+  orders.forEach((o, i) => {
+    const row = document.getElementById(`order-row-${i}`);
+    if (row) {
+      trackedFetch(o.api, { method: o.method.toUpperCase() }, row, 'OrderList');
+    }
+  });
+
+  // Form section
+  const formEl = document.getElementById('formSection');
+  trackedFetch('/api/categories', { method: 'GET' }, formEl, 'CategoryFilter');
+}
+
+// ── Card click
+function cardClick(id) {
+  if (!trackerActive) return;
+  const el = document.getElementById(`card-${id}`);
+  const p = products.find(x => x.id === id);
+  trackedFetch(p.api + '/detail', { method: 'GET' }, el, 'ProductCard');
+}
+
+// ── Load Orders
+function loadOrders() {
+  renderOrders(orders);
+  if (trackerActive) {
+    setTimeout(() => {
+      orders.forEach((o, i) => {
+        const row = document.getElementById(`order-row-${i}`);
+        if (row) {
+          trackedFetch(o.api, { method: o.method.toUpperCase() }, row, 'OrderList');
+        }
+      });
+    }, 50);
+  }
+}
+
+// ── Search
+function handleSearch(input) {
+  if (!trackerActive) return;
+  clearTimeout(handleSearch._timer);
+  handleSearch._timer = setTimeout(() => {
+    const el = document.getElementById('searchResult');
+    trackedFetch(`/api/search?q=${encodeURIComponent(input.value)}`, { method: 'GET', params: { q: input.value } }, input, 'SearchBar');
+    el.textContent = `正在搜索 "${input.value}"…`;
+  }, 400);
+}
+
+function handleCategoryChange(sel) {
+  if (!trackerActive) return;
+  trackedFetch(`/api/products?category=${sel.value}`, { method: 'GET', params: { category: sel.value } }, sel, 'CategoryFilter');
+}
+
+function handleSubmit() {
+  const q = document.getElementById('searchInput').value;
+  const cat = document.getElementById('categorySelect').value;
+  const el = document.getElementById('searchResult');
+  el.textContent = `搜索：${q || '全部'}，分类：${cat || '全部'}`;
+  if (trackerActive) {
+    trackedFetch(`/api/search`, { method: 'POST', params: { q, category: cat } }, document.querySelector('.form-section'), 'SearchBar');
+  }
+}
+
+// ─── Log helper ────────────────────────────────────────────────
+function log(level, msg) {
+  const panel = document.getElementById('logPanel');
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${level}`;
+  entry.textContent = `${time}  ${msg}`;
+  panel.insertBefore(entry, panel.firstChild);
+  if (panel.children.length > 50) panel.removeChild(panel.lastChild);
+}
+
+// ─── Init ──────────────────────────────────────────────────────
+renderCards();
+log('info', '页面加载完成，点击「启动 DomTracker」开始');
+</script>
+
+</body>
+</html>

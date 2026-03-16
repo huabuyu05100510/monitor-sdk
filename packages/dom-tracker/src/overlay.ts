@@ -28,7 +28,8 @@ export function showOverlay(target: Element, metadata: DomMetadata): void {
   const rect = target.getBoundingClientRect();
   const infoHtml = buildInfoHtml(metadata);
 
-  overlay.innerHTML = `
+  if (overlay) {
+    overlay.innerHTML = `
     <div style="
       position: absolute;
       top: ${rect.bottom + 8}px;
@@ -48,7 +49,8 @@ export function showOverlay(target: Element, metadata: DomMetadata): void {
       ${infoHtml}
     </div>
   `;
-  overlay.style.display = 'block';
+    overlay.style.display = 'block';
+  }
 }
 
 function buildInfoHtml(metadata: DomMetadata): string {

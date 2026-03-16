@@ -1,4 +1,4 @@
-import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { setDomMetadata, getDomMetadata } from './metadataStore';
 import type { ApiDataSource, JsResourceSource } from './types';
 
@@ -12,10 +12,10 @@ export function resetInterceptorState() {
 }
 
 export function setupAxiosInterceptor() {
-  const requestInterceptor = (config: AxiosRequestConfig): AxiosRequestConfig => {
+  const requestInterceptor = (config: InternalAxiosRequestConfig<any>): InternalAxiosRequestConfig<any> => {
     const id = requestId++;
     (config as any).requestId = id;
-    requestMap.set(id, { config, element: getCurrentElement() });
+    requestMap.set(id, { config: config as AxiosRequestConfig, element: getCurrentElement() });
     return config;
   };
 
@@ -42,7 +42,7 @@ export function setupAxiosInterceptor() {
   const id = axios.interceptors.request.use(requestInterceptor);
   const responseId = axios.interceptors.response.use(
     responseInterceptor,
-    requestErrorInterceptor
+    requestErrorInterceptor as any
   );
 
   return () => {
@@ -140,7 +140,7 @@ function getComponentStack(error?: any): string[] {
 
   // Split and clean up stack frames
   // Skip the first few frames that are internal to our interceptor
-  return stack.split('\n').slice(4, 13).map(line => {
+  return stack.split('\n').slice(4, 13).map((line: string) => {
     // Clean up stack frames
     // Remove "at " prefix and everything after file location
     return line.trim()
